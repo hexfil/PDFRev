@@ -756,6 +756,25 @@ fn selfcheck_dir() -> Result<String, ErrPayload> {
     Ok(d.display().to_string())
 }
 
+/// 设置原生窗口标题（界面语言切换时调；Rust 侧不做翻译，标题文本由前端给）
+///
+/// 为什么要绕一圈：`tauri.conf.json` 的 title 只在启动时生效，
+/// 用户在界面里换语言后任务栏 / 标题栏还留着旧语言。前端调这个命令同步。
+#[tauri::command]
+fn set_window_title(app: tauri::AppHandle, title: String) -> Result<serde_json::Value, ErrPayload> {
+    let w = app
+        .get_webview_window("main")
+        .ok_or_else(|| ErrPayload::keyed("WIN", "app.noWindow", serde_json::json!({}), "no main window"))?;
+    w.set_title(&title).map_err(|e| {
+        ErrPayload::keyed(
+            "WIN",
+            "app.titleFail",
+            serde_json::json!({ "msg": e.to_string() }),
+            &format!("could not set the window title: {}", e),
+        )
+    })?;
+    Ok(serde_json::json!({ "ok": true }))
+}
 /// 把窗口置前（外部截屏脚本用；自检跑完想让界面留在最前面时调它）
 #[tauri::command]
 fn selfcheck_front(app: tauri::AppHandle) -> Result<String, ErrPayload> {
@@ -774,6 +793,25 @@ fn selfcheck_front(app: tauri::AppHandle) -> Result<String, ErrPayload> {
     Ok(format!("{}x{}", size.width, size.height))
 }
 
+/// 读回原生窗口标题（自检用）。
+///
+/// 为什么要专门开一个：`set_window_title` 只是「发出去了」，
+/// 前端看不到操作系统的窗口属性到底改没改。自检里断言
+/// 「窗口标题 === 当前语言的 app.title」才算真的验证了任务栏文案。
+#[tauri::command]
+fn selfcheck_window_title(app: tauri::AppHandle) -> Result<String, ErrPayload> {
+    let w = app
+        .get_webview_window("main")
+        .ok_or_else(|| ErrPayload::keyed("SHOT", "app.noWindow", serde_json::json!({}), "no main window"))?;
+    w.title().map_err(|e| {
+        ErrPayload::keyed(
+            "SHOT",
+            "app.titleFail",
+            serde_json::json!({ "msg": e.to_string() }),
+            &format!("could not read the window title: {}", e),
+        )
+    })
+}
 /// 接收前端自检进度并落盘；`done` 为 true 时写结尾标记（供外部轮询判断跑完）
 ///
 /// 写入策略：先写同目录下的临时文件再改名覆盖。
@@ -845,7 +883,9 @@ pub fn run() {
             selfcheck_dir,
             selfcheck_report,
             selfcheck_enabled,
-            selfcheck_front
+            selfcheck_front,
+            selfcheck_window_title,
+            set_window_title
         ])
         .setup(|app| {
             // 开发期把窗口显示出来（配置文件里 visible=false 避免白屏闪烁）

@@ -542,6 +542,14 @@
         (() => { try { return String(localStorage.getItem('pdfrev.lang')); } catch (e) { return '无'; } })());
 
       /* 后端错误也要跟着语言走：Rust 只给 ekey，文案在这里翻 */
+      put('切到英文后网页标题为 PDF Revisor',
+        document.title === 'PDF Revisor', document.title);
+      /* 真正读回操作系统里的窗口标题，光断言「方法存在」证明不了任务栏文案已改 */
+      await wait(300);
+      let enTitle = '';
+      try { enTitle = await window.api.windowTitle(); } catch (e) { enTitle = 'ERR:' + e; }
+      put('切到英文后原生窗口标题为 PDF Revisor（任务栏 / 标题栏）',
+        enTitle === 'PDF Revisor', enTitle || '(空)');
       put('后端错误按当前语言渲染（英文）',
         tErr({ ok: false, code: 'PDF', ekey: 'pdf.pagerange', eargs: { n: 9, total: 3 } })
           === 'Page 9 is out of range (the document has 3 pages)',
@@ -550,6 +558,13 @@
       /* 切回中文：后面的收尾检查（以及用户下次打开）回到默认语言 */
       setLang('zh');
       await wait(300);
+      put('切回中文后网页标题复原',
+        document.title === 'PDFRev - PDF 页面修改器', document.title);
+      await wait(300);
+      let zhTitle = '';
+      try { zhTitle = await window.api.windowTitle(); } catch (e) { zhTitle = 'ERR:' + e; }
+      put('切回中文后原生窗口标题复原',
+        zhTitle === 'PDFRev - PDF 页面修改器', zhTitle || '(空)');
       put('切回中文后按钮文案复原', $('btnOpen').textContent === '打开 PDF',
         $('btnOpen').textContent);
       put('切回中文后 <html lang> 复原', document.documentElement.lang === 'zh-CN',

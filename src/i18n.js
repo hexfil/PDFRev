@@ -193,7 +193,7 @@ const I18N_ZH = {
   'cli.spec': '批量执行 spec.json',
 };
 const I18N_EN = {
-  'app.title': 'PDFRev - PDF Page Editor',
+  'app.title': 'PDF Revisor',
   'app.fileFilter': 'PDF files',
 
   'tb.open': 'Open PDF',
@@ -398,6 +398,7 @@ const I18N_ERR = {
     'shot.size': '取窗口尺寸失败: {msg}',
     'selfcheck.dir': '无法创建自检目录: {msg}',
     'selfcheck.write': '写自检报告失败: {msg}',
+    'app.titleFail': '设置窗口标题失败: {msg}',
   },
   en: {
     'io.eacces': 'No write permission, cannot {act} {path}. If this is a protected system folder, use "Save As" to save to Documents or Desktop.',
@@ -435,6 +436,7 @@ const I18N_ERR = {
     'shot.size': 'Failed to get the window size: {msg}',
     'selfcheck.dir': 'Could not create the self-check directory: {msg}',
     'selfcheck.write': 'Failed to write the self-check report: {msg}',
+    'app.titleFail': 'Could not set the window title: {msg}',
   },
 };
 
@@ -551,6 +553,27 @@ function applyI18n(root) {
 
   document.title = t('app.title');
   document.documentElement.lang = i18nLang === 'en' ? 'en' : 'zh-CN';
+  applyNativeTitle();
+}
+
+/**
+ * 同步原生窗口标题（任务栏 / 标题栏）。
+ *
+ * <title> 只影响网页自己，任务栏上显示的是窗口属性，所以要多调一次 Rust。
+ * 启动时 window.api 可能还没被 bridge-tauri.js 装好（脚本顺序：i18n 在它前面），
+ * 那就等 DOMContentLoaded 再补一次 —— 两种情况都必须覆盖，否则英文界面下
+ * 任务栏还挂着中文标题。
+ */
+function applyNativeTitle() {
+  const title = t('app.title');
+  try {
+    if (window.api && typeof window.api.setWindowTitle === 'function') {
+      const p = window.api.setWindowTitle(title);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+  } catch (e) {
+    /* 桥接层还没就绪 / 非 Tauri 环境（纯浏览器打开）都不影响界面 */
+  }
 }
 
 /** 语言下拉里可选项（<option> 用各语言自己的名字，不翻译） */
@@ -580,3 +603,13 @@ function i18nInit() {
 }
 
 i18nInit();
+
+/* bridge-tauri.js 在本文件之后加载，启动那一刻还没有 window.api；
+   等 DOM 就绪再补一次原生标题。 */
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyNativeTitle);
+  } else {
+    applyNativeTitle();
+  }
+}

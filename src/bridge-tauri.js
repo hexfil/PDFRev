@@ -120,6 +120,15 @@
    * Tauri 的 webview 拿不到拖入文件的磁盘路径（Electron 靠 webUtils）。
    * 返回空串，让 app.js 走「内存打开、首次保存时选位置」的分支。
    */
+  /**
+   * 设置原生窗口标题。i18n.js 只管 <title>（网页标题），任务栏/标题栏是
+   * 操作系统的窗口属性，得单独让 Rust 侧 set_title。
+   */
+  api.setWindowTitle = async (title) => call('set_window_title', { title: String(title || '') });
+
+  /** 读回原生窗口标题（仅自检用；界面上要拿标题直接看 document.title） */
+  api.windowTitle = async () => call('selfcheck_window_title');
+
   api.getFilePath = () => '';
 
   window.api = api;

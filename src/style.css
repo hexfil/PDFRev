@@ -24,6 +24,8 @@ body {
   padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
+/* 顶栏品牌图标：用设计原图生成的小尺寸 PNG（见 tools/make-assets.py） */
+.brand-icon { width: 20px; height: 20px; display: block; }
 .brand { font-weight: 700; letter-spacing: .5px; color: var(--accent); margin-right: 6px; }
 .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
 /* 顶栏文件信息：两行 —— 第一行文件名/页数/大小，第二行完整路径 + 创建/修改时间 */
@@ -234,7 +236,13 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   padding: 22px 26px; width: min(620px, 86vw); max-height: 86vh; overflow: auto;
   box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
 }
-.cr-title { margin: 0 0 6px; font-size: 16px; }
+/* 版权页 logo：原图是白底，放在深色卡片上会是一块白砖，所以反相成浅色底片
+   并降低不透明度，让它像一枚水印而不是贴纸；圆角 + 内边距避免边缘生硬。 */
+.cr-logo {
+  display: block; margin: 0 auto 14px; width: min(320px, 70%);
+  background: #fff; border-radius: 6px; padding: 10px 12px;
+}
+.cr-title { margin: 0 0 6px; font-size: 16px; text-align: center; }
 .cr-holder {
   margin: 0 0 14px; padding-bottom: 12px; color: var(--fg);
   border-bottom: 1px solid var(--line); font-size: 13px;

@@ -661,14 +661,44 @@ fn selfcheck_front(app: tauri::AppHandle) -> Result<String, ErrPayload> {
 }
 
 /// 接收前端自检进度并落盘；`done` 为 true 时写结尾标记（供外部轮询判断跑完）
+///
+/// 写入策略：先写同目录下的临时文件再改名覆盖。
+/// 外部的轮询脚本（tools/selfcheck.ps1）会反复读这个报告，直接 fs::write
+/// 目标文件时两边会撞上，报 os error 32（另一个程序正在使用此文件）。
+/// 改名是原子替换，读方要么看到旧版要么看到新版，不会看到半个文件。
 #[tauri::command]
 fn selfcheck_report(text: String, done: bool) -> Result<serde_json::Value, ErrPayload> {
-    fs::write(selfcheck_path(), text.as_bytes()).map_err(|e| ErrPayload {
+    // 前端每出一条结论就落一次盘，这些调用是并发的；不加锁的话
+    // 多个线程会同时写同一个临时文件，反而制造出新的 os error 32。
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let path = selfcheck_path();
+    let tmp = path.with_extension("txt.tmp");
+    fs::write(&tmp, text.as_bytes()).map_err(|e| ErrPayload {
         ok: false,
         code: "IO".into(),
         error: format!("写自检报告失败: {}", e),
     })?;
-    Ok(serde_json::json!({ "ok": true, "done": done }))
+    // 目标被占用时改名可能失败，重试几次（读方是毫秒级的一次读，很快就放开）
+    let mut last = None;
+    for _ in 0..10 {
+        match fs::rename(&tmp, &path) {
+            Ok(_) => {
+                return Ok(serde_json::json!({ "ok": true, "done": done }));
+            }
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+        }
+    }
+    let _ = fs::remove_file(&tmp);
+    Err(ErrPayload {
+        ok: false,
+        code: "IO".into(),
+        error: format!("写自检报告失败: {}", last.unwrap()),
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

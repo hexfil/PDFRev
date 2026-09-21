@@ -111,17 +111,26 @@ src/                        前端（与原版共享界面逻辑）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）
+  assets/pdfrev_logo.png    版权页 logo（由 tools/make-assets.py 生成）
+  assets/pdfrev_icon.png    界面用图标（同上）
 src-tauri/
   src/lib.rs                全部 IPC 命令（对应原版 main.js + preload.js）
   src/pdfops.rs             PDF 页面操作核心（对应原版 pdfops.js）+ 14 项单元测试
   examples/vpeg_check.rs    真实文档端到端验收
   tauri.conf.json           窗口、CSP、打包配置
-  icons/icon.ico            图标
+  icons/icon.ico            应用图标（多尺寸，由 tools/make-assets.py 生成）
+  icons/icon.png            512x512 图标
 tools/
   build.ps1                 构建 + 自检 + 组装 dist\
   selfcheck.ps1             跑界面自检并把报告打印出来
+  screenshot.ps1            给界面截图（配合 WinShot.cs）
+  WinShot.cs                PrintWindow + PW_RENDERFULLCONTENT + DPI 感知
+  make-assets.py            从设计原图生成图标与版权页 logo
 test/
   tauri-ui.png              界面截图
+  copyright.png             版权页截图
+pdfrev_icon.png             设计原图（应用图标，1024x1024）
+pdfrev_logo.png             设计原图（logo，1536x1024）
 ```
 
 ## 实现要点
@@ -211,4 +220,34 @@ BOM 标记的 UTF-16、无 BOM 但「偶数长度 + 奇数位大量 0」的 UTF-
 4. 本软件不提供任何质保。
 ```
 
-界面里的版权页沿用原版（`src/index.html` + `app.js` 里的生成块）。
+界面里的版权页沿用原版（`src/index.html` + `app.js` 里的生成块），
+并在顶部放了 `pdfrev_logo.png`。
+
+### 版权页的编号怎么来的
+
+条款用 `<ol>` 渲染，**序号由 `<ol>` 自己生成**，代码里只写小标题：
+
+```js
+b.textContent = c.k + '：';   // 正确：渲染成 "1. 个人非商业使用：..."
+// b.textContent = c.n + '. ' + c.k + '：';   // 错：会变成 "1. 1. 个人非商业使用：..."
+```
+
+之前文案里手写了「1.」，`<ol>` 又加一遍，界面上就是「1. 1. 2. 2. …」。
+现在文本里不再带序号，序号统一交给 `<ol>`。
+
+## 图标与素材
+
+设计原图放在项目根目录（`pdfrev_icon.png`、`pdfrev_logo.png`），
+用脚本生成实际使用的素材：
+
+```powershell
+python tools\make-assets.py
+```
+
+生成 `src-tauri/icons/icon.ico`（16/24/32/48/64/128/256 七个尺寸）、
+`src-tauri/icons/icon.png`（512）、`src/assets/pdfrev_logo.png`（版权页用，720px 宽）。
+
+脚本做了一件必要的事：`pdfrev_icon.png` 是 AI 出图，**把「透明」画成了灰白
+棋盘格**（40.96px 一格的烘焙像素，不是真透明）。直接用会在任务栏里显示格子。
+脚本按「与边界连通的浅色低饱和区域」找出棋盘格底并置为真透明，
+再对边缘做 anti-alias 的 alpha 估算，所以小尺寸图标也不会留白边。

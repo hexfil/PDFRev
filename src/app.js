@@ -1108,7 +1108,8 @@ function renderCopyright() {
   for (const c of COPYRIGHT_CLAUSES) {
     const li = document.createElement('li');
     const b = document.createElement('b');
-    b.textContent = c.n + '. ' + c.k + '：';
+    // <ol> 已经自带 1./2./3./4. 编号，这里只渲染标题，避免出现「1. 1. 个人非商业使用」
+    b.textContent = c.k + '：';
     li.appendChild(b);
     li.appendChild(document.createTextNode(c.t));
     list.appendChild(li);

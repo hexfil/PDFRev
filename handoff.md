@@ -204,6 +204,53 @@ example 必须放在 `src-tauri/examples/`，`#[path]` 按该位置解析。
 Tauri 的 webview 拿不到拖入文件的真实路径（Electron 靠 webUtils）。
 桥接层 `getFilePath()` 返回空串，于是走 app.js 里已有的「内存打开、保存时再选位置」分支 —— 正好就是需求要的「拖入不另存，直接打开」。
 因此 `tauri.conf.json` 里 `dragDropEnabled: false`，让 HTML5 拖放生效。
+### 5.17 版权页的序号是 <ol> 给的，文本里不能再写「1.」
+
+条款用 `<ol>` 渲染，序号由 `<ol>` 自己生成。代码里只写小标题：
+
+```js
+b.textContent = c.k + '：';   // 对：渲染成 "1. 个人非商业使用：..."
+// b.textContent = c.n + '. ' + c.k + '：';   // 错：变成 "1. 1. 个人非商业使用：..."
+```
+
+原实现两边都写，界面上就是「1. 1. 2. 2. …」。
+`src/index.html` 里的占位 `<li>` 也一并去掉手写序号（JS 会重填，但静态标记要保持一致）。
+
+### 5.18 AI 出图的「透明」是烘焙的棋盘格
+
+`pdfrev_icon.png` 是 AI 生成的，**把「透明」直接画成了灰白棋盘格**
+（1024 边长上 25 格，40.96px 一格，左上角第一格是 235 灰）。
+直接当图标用，任务栏里会显示一整片格子。
+
+`tools/make-assets.py` 的处理办法：
+1. 按「亮度 > 205 且饱和度 < 28」找浅色区，**只取与边界 4 连通的那一块**
+   当背景（图形内部的纯白 255 是设计的一部分，不能一起抠掉）；
+2. 置为真透明，再对紧贴背景的一圈做 anti-alias：用「像素与重建出的棋盘格
+   底色的距离 / 48」估算 alpha，避免边缘留一圈白毛；
+3. 裁到内容 bbox 再补成正方形（原图四周有大片空白，直接缩放会偏小且不居中）。
+
+### 5.19 截图脚本必须先做 DPI 感知
+
+PowerShell 是 DPI-unaware 的：Windows 会把窗口坐标虚拟化成逻辑像素，
+`GetWindowRect` 返回的是缩小过的一整套整数（本机 2404x1639 -> 1374x937）。
+`PrintWindow` 再往这个缩小的位图上贴真实像素，结果只贴进窗口内容的一角 ——
+截出来的图看起来「版权页卡片跑到右半边」，全是伪影，不是界面真的错位。
+所以 `tools/screenshot.ps1` 在取坐标前先调 `WinShot.MakeDpiAware()`。
+
+另外 WebView2 是 DirectComposition 渲染，普通 BitBlt 抓到的是空白，
+必须 `PrintWindow(hwnd, hdc, 2)`（`PW_RENDERFULLCONTENT`）。
+
+### 5.20 自检报告文件的两侧竞争
+
+前端每出一条结论就落一次盘，而外部 `selfcheck.ps1` 同时在轮询读它：
+
+- 读方：`[System.IO.File]::ReadAllText` 默认独占打开，会把写方挡在门外
+  （os error 32）。改用 `FileShare.ReadWrite` 打开（`Read-Shared` 函数）。
+- 写方：改成「写临时文件 + 改名覆盖」的原子替换，并对改名失败重试；
+  再加一把 `static Mutex` 串行化，因为前端那些落盘调用本身是并发的。
+- 前端：`report()` 里 `invoke` 返回的 Promise 必须 `.catch(() => {})`。
+  不吞掉的话，被占用时那次 reject 会变成 unhandledrejection，
+  最后「渲染进程无未捕获错误」那一项会被自己制造的噪音判 FAIL（真踩过）。
 ### 5.16 pdf.js 的 destroy() 会 reject（自检偶发 FAIL 的根因）
 
 `PDFDocumentProxy.destroy()` 返回 Promise：**渲染进行中被 destroy、
@@ -343,11 +390,14 @@ Tauri 的 webview 拿不到拖入文件的真实路径（Electron 靠 webUtils�
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 40 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4.49 MB |
-| 便携性 | 单独放空目录仍 40 项全绿，无需额外 dll |
-| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.49 MB（1.93%） |
-| 界面截图 | test\tauri-ui.png（1374x937，704 色，61% 深色，非白屏） |
+| 界面自检 | 45 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,658,688 字节（4.44 MB） |
+| 便携性 | 单独放空目录仍全绿，无需额外 dll |
+| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.44 MB（1.91%） |
+| 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
+| 应用图标 | exe 内嵌图标已换：32x32 抽样 69.7% 红色、真透明、无棋盘残留 |
+| 版权页 | 无重复编号；logo 已加载（720x269，显示宽 320px） |
+
 ---
 
 ## 12. 与 Electron 原版的功能对照
@@ -384,5 +434,8 @@ Tauri 的 webview 拿不到拖入文件的真实路径（Electron 靠 webUtils�
 - `handoff.md` — 本文件
 - 源码：`src\`（前端）+ `src-tauri\src\`（Rust）
 - 工具：`tools\build.ps1`、`tools\selfcheck.ps1`
+- 工具：`tools\build.ps1`、`tools\selfcheck.ps1`、`tools\screenshot.ps1`、`tools\make-assets.py`
+- 素材：`src\assets\pdfrev_logo.png`（版权页）、`src\assets\pdfrev_icon.png`（顶栏）
+- 设计原图：根目录 `pdfrev_icon.png`、`pdfrev_logo.png`（脚本的输入，不入构建产物）
 
 发布版不含 `src-tauri\target\`（已 gitignore）。

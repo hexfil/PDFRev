@@ -33,8 +33,13 @@
       ? ['', '总计: ' + (log.length - failed) + ' 通过, ' + failed + ' 失败', '自检完成']
       : ['', '（自检进行中…）'];
     const text = head.concat(log, tail).join('\r\n');
+    // 报告是 fire-and-forget 的进度落盘，本身不影响自检结论。
+    // 但 invoke 返回 Promise：外部轮询脚本若正好占用着报告文件，
+    // 这里会 reject，不吞掉就变成 unhandledrejection，
+    // 最后「渲染进程无未捕获错误」那一项会被自己制造的噪音判 FAIL（踩过）。
     try {
-      window.__TAURI__.core.invoke('selfcheck_report', { text, done: !!done });
+      const pr = window.__TAURI__.core.invoke('selfcheck_report', { text, done: !!done });
+      if (pr && typeof pr.catch === 'function') pr.catch(() => {});
     } catch (e) {
       /* 报告写不进去不影响自检本身 */
     }
@@ -140,6 +145,35 @@
       const holder = document.querySelector('#copyright .cr-holder').textContent;
       put('版权行含版权方与邮箱',
         holder.includes('何险峰') && holder.includes('xfhe@ipe.ac.cn'), holder);
+
+      /* 条款文案里不能再出现「1. 1. ...」这种双重编号：
+         <ol> 自带序号，文本里若再写一遍就会重复。 */
+      const crItems = Array.from(document.querySelectorAll('#copyright .cr-list li'))
+        .map((li) => li.textContent);
+      const dupNum = crItems.filter((s) => /^\s*\d+\.\s*\d+\./.test(s));
+      put('条款无重复编号（<ol> 自带序号，文本里不再写「1.」）',
+        dupNum.length === 0, JSON.stringify(dupNum));
+      put('条款标题仍完整',
+        crItems.length === 4 && crItems[0].startsWith('个人非商业使用：') &&
+        crItems[1].startsWith('商业使用定义：') &&
+        crItems[2].startsWith('禁止行为：') &&
+        crItems[3].startsWith('免责：'),
+        JSON.stringify(crItems.map((s) => s.slice(0, 8))));
+
+      /* 版权页 logo：要真的加载出来（naturalWidth > 0），不能是碎图 */
+      const logo = document.querySelector('#copyright .cr-logo');
+      const logoOk = !!logo && logo.complete && logo.naturalWidth > 0;
+      put('版权页含 logo 且已加载',
+        logoOk, logo ? (logo.naturalWidth + 'x' + logo.naturalHeight + ' | ' + logo.getAttribute('src')) : '无 .cr-logo');
+      put('logo 尺寸合理（宽度不超过卡片）',
+        logoOk && logo.getBoundingClientRect().width <= $('copyright').querySelector('.cr-box').getBoundingClientRect().width,
+        logoOk ? String(Math.round(logo.getBoundingClientRect().width)) + 'px' : '未加载');
+
+      /* 顶栏品牌图标（同一套素材里的小尺寸 PNG） */
+      const bi = document.querySelector('.toolbar .brand-icon');
+      const biOk = !!bi && bi.complete && bi.naturalWidth > 0;
+      put('顶栏品牌图标已加载', biOk,
+        bi ? (bi.naturalWidth + 'x' + bi.naturalHeight + ' | ' + bi.getAttribute('src')) : '无 .brand-icon');
       $('crClose').click();
       await wait(300);
       put('点「关闭」可收起版权页', $('copyright').classList.contains('hidden'));

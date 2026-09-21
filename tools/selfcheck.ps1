@@ -19,6 +19,21 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 
+<#
+  以共享方式读文本文件。
+
+  .NET 的 [System.IO.File]::ReadAllText 默认用 FileShare.Read 打开，
+  相当于短暂独占；自检那个 exe 同时也在写这个报告，两边会撞上并报
+  os error 32。这里显式用 FileShare.ReadWrite，允许读写同时进行。
+#>
+function Read-Shared([string]$Path) {
+  $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+  try {
+    $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
+    try { return $sr.ReadToEnd() } finally { $sr.Dispose() }
+  } finally { $fs.Dispose() }
+}
 function Fail($m) { Write-Host "错误: $m" -ForegroundColor Red; exit 1 }
 
 if (-not $Exe) {
@@ -47,7 +62,10 @@ $deadline = (Get-Date).AddSeconds($TimeoutSec)
 $text = ''
 while ((Get-Date) -lt $deadline) {
   if (Test-Path $Report) {
-    try { $text = [System.IO.File]::ReadAllText($Report, [System.Text.Encoding]::UTF8) } catch { $text = '' }
+    # 必须用 FileShare.ReadWrite 打开：ReadAllText 默认独占，会把正在
+    # 写报告的那个 exe 挡在门外（os error 32），报告里就会多出
+    # 一条「写自检报告失败」的假错误。
+    try { $text = Read-Shared $Report } catch { $text = '' }
     if ($text -match '自检完成') { break }
   }
   Start-Sleep -Milliseconds 700

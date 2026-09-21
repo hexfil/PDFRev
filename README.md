@@ -9,7 +9,7 @@
 |---|---|---|
 | 运行时 | 自带 Chromium + Node | 用系统 WebView2（Win10+ 自带） |
 | PDF 处理 | `pdf-lib`（JS） | `lopdf`（Rust） |
-| 产物 | 便携版 7z 61.44 MB / 解压 233 MB | **单个 exe 4.45 MB** |
+| 产物 | 便携版 7z 61.44 MB / 解压 233 MB | **单个 exe 4.48 MB** |
 | 界面代码 | `src/renderer/app.js` | 同一个文件，复制过来未改 |
 
 体积差 50 倍，是因为 Tauri 不打包浏览器引擎。
@@ -35,6 +35,7 @@
 | 另存为 / 选择保存位置 | `save_as` / `pick_save_path` |
 | 等价命令行 / JSON 展示与复制 | 前端 + `copy_text` |
 | 版权与许可页（首次自动弹） | 前端，与原版同源 |
+| 多语言界面（简中 / 英文）+ 顶栏语言选择框 | src/i18n.js，界面全部菜单/按钮/提示随语言切换 |
 
 ## 启动
 
@@ -56,12 +57,12 @@ powershell -ExecutionPolicy Bypass -File tools\build.ps1
 产物：
 
 ```
-dist\PDFRev.exe                     4.45 MB（单文件，直接双击运行）
+dist\PDFRev.exe                     4.48 MB（单文件，直接双击运行）
 dist\LICENSE                        MIT 许可原文，随包分发
 ```
 
 **单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
-（已实测：把 exe 单独放进空目录，69 项自检全部通过。）
+（已实测：把 exe 单独放进空目录，85 项自检全部通过。）
 
 ## 测试
 
@@ -85,7 +86,7 @@ cargo run --example vpeg_check
 会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
 并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
 
-### 3. 界面端到端自检（69 项，真实 WebView2）
+### 3. 界面端到端自检（85 项，真实 WebView2）
 
 ```powershell
 cd F:\PDFRev_Tauri
@@ -94,7 +95,7 @@ powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
 
 在真实窗口里跑完整链路：版权页 → 打开 PDF → 缩略图 → 顶栏信息 → 双击预览
 → 滚轮缩放 → 预览内 Delete 删页 → 排序 → 撤销 → 旋转 → 保存落盘 → stat
-→ 剪贴板 → 真实文档 62 页渲染 → 无未捕获错误。
+→ 剪贴板 → 真实文档 62 页渲染 → 国际化（切语言 / 文案 / 后端错误本地化）→ 无未捕获错误。
 
 报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`（WebView2 是 GUI 进程，
 从终端拿不到 stdout，所以只能落盘）。
@@ -105,9 +106,10 @@ powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
 src/                        前端（与原版共享界面逻辑）
   index.html                界面骨架（含版权页块）
   app.js                    业务逻辑 —— 复用原版，另含版权页与命令行帮助生成块
+  i18n.js                   ★ 多语言词典与切换逻辑（界面文案唯一来源）
   style.css                 样式
   bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
-  selfcheck.js              界面端到端自检（--selfcheck 时跑，69 项）
+  selfcheck.js              界面端到端自检（--selfcheck 时跑，85 项）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）

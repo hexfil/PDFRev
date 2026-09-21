@@ -57,10 +57,14 @@
       return await invoke(cmd, args);
     } catch (e) {
       if (e && typeof e === 'object') {
+        // ekey/eargs 必须原样带回去：界面用它们按当前语言渲染错误文案
+        // （丢了它们就只能显示 Rust 那边的英文兜底，切语言不生效）。
         return {
           ok: false,
           code: e.code || '',
           error: e.error || e.message || String(e),
+          ekey: e.ekey,
+          eargs: e.eargs,
         };
       }
       return { ok: false, code: '', error: String(e) };

@@ -3,7 +3,7 @@
 > 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
 > 最后更新：2026-09-21 17:20
 >
-> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 69 项，全部通过。
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 85 项，全部通过。
 
 ---
 
@@ -16,7 +16,7 @@
 
 | | Electron 版 | Tauri 版 |
 |---|---|---|
-| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.45 MB |
+| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.48 MB |
 | 运行时 | 自带 Chromium + Node | 系统 WebView2 |
 | 相对体积 | 100% | 1.93% |
 
@@ -262,6 +262,60 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 修法：生成标记改成独一无二的 `/* ==== CLI-HELP-BLOCK:`，
 手写段另起一个不同措辞的注释头，并在注释里写明「别改成和生成标记一样」。
 
+### 5.25 多语言（i18n）：文案只有一处，Rust 不返回中文
+
+**需求**：各类菜单都支持国际化，顶栏加语言选择框。
+
+架构（三个决定，都很重要）：
+
+1. **词典单一来源**：`src/i18n.js` 里 `I18N_ZH` / `I18N_EN` 两张平铺表
+   （151 个键），加上 `I18N_ERR`（35 个后端错误键）。缺键回落 zh，再回落键名本身，
+   所以漏翻时界面上会直接看见 `pdf.pagerange` 这种键名，不会静默显示空白。
+2. **静态标记**：`index.html` 上写 `data-i18n`（textContent）、`data-i18n-html`
+   （innerHTML，只有带 `<b>`/`<code>` 的许可声明用）、`data-i18n-title`、
+   `data-i18n-ph`（placeholder）、`data-i18n-aria`。`applyI18n()` 在启动和
+   每次 `setLang()` 时整表灌一遍 —— 静态文案不需要 app.js 参与。
+3. **Rust 不返回中文**：所有错误改成返回语言无关的
+   `{ code, ekey, eargs, error }`：
+   - `ekey` —— 稳定键，如 `pdf.pagerange` / `io.eacces`
+   - `eargs` —— 占位符实参，如 `{ n: 9, total: 3 }`
+   - `error` —— 英文兜底（没有 ekey 时才用）
+
+   翻译只在 `src/i18n.js` 的 `I18N_ERR` 一处，前端用 `tErr(res)` 渲染。
+   **加语言不用动 Rust、不用重编译**。`pdfops.rs` 新增 `PdfErr { key, args, en }`
+   与 `pub type Res<T> = Result<T, PdfErr>`，`lib.rs` 里实现
+   `impl From<pdfops::PdfErr> for ErrPayload` 做转换。
+
+踩过的坑：
+
+- **`bridge-tauri.js` 必须原样转发 `ekey`/`eargs`**。Tauri 的 `Err(ErrPayload)`
+  在 JS 侧是 Promise reject，桥接层把它归一化成 `{ ok:false, code, error }` ——
+  早先只搬了 `code`/`error`，`ekey` 丢了，于是切到英文时后端错误仍显示英文兜底
+  （看起来「像是翻了」，其实只是没走翻译表）。
+- **不懂 `-replace` 就别用它做整段改写**。上一轮用 PowerShell 的
+  here-string + `-replace` 往 `pdfops.rs` 里塞代码，结果把 `\n` 当成了
+  **字面两字符**写进文件（`PdfErr::with(\n            "pdf.pagerange",\n ...)`），
+  cargo 报了一堆语法错。要么用 `'...'` 单引号 here-string（`\n` 不会转义）
+  并显式写真实的换行，要么用 `[System.IO.File]::WriteAllText` 拼数组。修法：
+  `$t.Replace('\n', "`r`n")` 或改回真换行。
+- **PowerShell 写盘会把 LF 变 CRLF**，而 `.gitattributes` 规定 `*.js`/`*.css`/
+  `*.html`/`*.rs` 是 `eol=lf`。用 `Get-Content` + `Set-Content` 改一次文件，
+  整文件就「全变了」，而且 `tools/cli-help.js --check` 会报「与工具不同步」
+  （它比对的是完整字节）。改完统一 `Replace("`r`n","`n")` 再写回。
+- **改 `renderFileInfo()` 这种多行块时，`Get-Content` 切片会漏行**。
+  这次漏掉了 `line2.appendChild(meta)`，自检报「顶栏显示创建与修改时间 -> (无)」。
+  切行之后一定回头读一遍函数全文，或直接用精确字符串 `Replace`。
+- **切语言要重画的只有 JS 拼出来的东西**：顶栏文件信息、缩略图角标
+  （`.chk` title / `.ph` / `.idx`）、插入位置下拉、命令行帮助面板、版权页条款、
+  已打开的预览标题。这些集中在 `window.addEventListener('pdfrev:langchange', ...)`
+  里，由 `setLang()` 派发自定义事件触发 —— i18n.js 不反向依赖 app.js。
+- **CLI 帮助内容也分语言**：`tools/cli-help.js` 现在生成
+  `CLI_HELP_BY_LANG = { zh: {...}, en: {...} }`，渲染时用 `CLI_HELP_OF()` 取当前语言。
+  注意用 `cliHelpLang`（语言 id）当「已渲染」标记，不能用布尔 ——
+  否则切语言后面板不会重画。
+- **窗口标题仍是中文**：`tauri.conf.json` 的 `title` 在启动时定死，要跟着语言变
+  得前端调 `setTitle`。这一轮没做（界面内文案已全跟随）；若要做，在
+  `langchange` 处理器里加一句即可。
 ### 5.24 顶栏品牌的位置与字号（用户指定）
 用户要求两件事，都只改顶栏，不碰其它视图：
 
@@ -276,7 +330,7 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
    肉眼看不出「更黑」。所以额外加 `-webkit-text-stroke: .35px var(--accent)`
    做极细描边压黑——比 `text-shadow` 干净，也不会在小字号下糊成一团。
 
-配套加了 3 项自检（69 项基线就是这么来的）：
+配套加了 3 项自检（当时的基线是 69 项，现在是 85 项）：
 - 用 `compareDocumentPosition` 断言 `.brand` 与 `.brand-icon` 都排在
   `#btnCopyright` 之前（只断言 `.brand` 不够，图标也得在按钮左边）。
 - `getComputedStyle(.brand).fontSize === '15px'`。
@@ -337,17 +391,17 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 
     & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
 
-### 6.3 界面端到端自检（69 项，跑在真实 WebView2 里）
+### 6.3 界面端到端自检（85 项，跑在真实 WebView2 里）
 
 `src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
 
 **为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
 只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
 
-覆盖清单（69 项）：
+覆盖清单（85 项）：
 | 组 | 项数 | 覆盖内容 |
 |---|---|---|
-| 版权页 | 16 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、静态标记与 JS 常量一致、可关闭 |
+| 版权页 | 16 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、文案与 i18n 词典一致、可关闭 |
 | 顶栏品牌 | 3 | 品牌图标已加载、logo + PDFRev 排在版权按钮之前、标题字号 15px / 字重 >=800 |
 | 桥接层 | 2 | window.api 注入、11 方法一一对应 |
 | 命令行帮助 | 15 | 有「帮助」按钮、初始隐藏、可打开、列出全部 7 命令、命令名齐全、4 个通用参数、页码写法、插入位置写法、9 条示例、示例完整可复制、示例覆盖面、spec.json 样例、命令可点击复制、Esc 关闭、无未填占位 |
@@ -360,6 +414,7 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | 剪贴板与路径 | 2 | 写剪贴板、桥接层不返回磁盘路径（拖入走内存分支） |
 | 真实文档 | 6 | 打开 VPEg.pdf、报 62 页、中文标题 UTF-16BE 正确解码、渲染 62 缩略图、缩略图有内容、删除第 1 页 |
 | 稳定性 | 3 | 可重开帮助面板、窗口置前、渲染进程无未捕获错误 |
+| 国际化 | 16 | 语言选择框存在、2 个选项、选项用各语言自身名称、所有 data-i18n 标记都能查到词条、静态标记覆盖 >=50 处、切英文后按钮文案变英文、`<html lang>` 变 en、标签变英文、版权页变英文、页数文案变英文（pages）、选择被 localStorage 记住、后端错误按语言渲染、切回中文后复原、缩略图角标重画、切语言不改页数 |
 
     cd F:\PDFRev_Tauri
     powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
@@ -445,13 +500,14 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 69 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,664,832 字节（4.45 MB） |
+| 界面自检 | 85 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,697,088 字节（4.48 MB） |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
-| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.44 MB（1.91%） |
+| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.48 MB（1.92%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
 | 应用图标 | exe 内嵌图标已换：32x32 抽样 69.7% 红色、真透明、无棋盘残留 |
 | 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
+| 多语言 | 界面全量支持简中 / 英文，顶栏语言选择框，后端错误也按语言渲染（16 项断言） |
 
 ---
 
@@ -478,12 +534,13 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | 在资源管理器定位 | 有 | 有 | |
 | 复制文本到剪贴板 | 有 | 有 | |
 | 版权页 | 许可条款页 | MIT 许可页（原版是自定义商业条款） |
+| 多语言界面 | 无 | 简中 / 英文 + 顶栏语言选择框（全部菜单/按钮/提示/错误） |
 
 ---
 
 ## 13. 交付物清单
 
-- `dist\PDFRev.exe` — 单文件便携版（4.45 MB）
+- `dist\PDFRev.exe` — 单文件便携版（4.48 MB）
 - `dist\LICENSE`（MIT）
 - `README.md` — 使用与构建说明
 - `handoff.md` — 本文件

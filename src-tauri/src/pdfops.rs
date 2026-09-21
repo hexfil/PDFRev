@@ -4,9 +4,47 @@
 //! 用 lopdf 重建文档，保留来源 PDF 的 Title / Author / Subject / Keywords / Creator。
 
 use lopdf::{dictionary, Document, Object, ObjectId, StringFormat};
+use serde_json::{json, Value};
 
-/// 页码表达式解析成功的统一错误类型（映射成前端能看的字符串）
-pub type Res<T> = Result<T, String>;
+/// 语言无关的错误。
+///
+/// 这里不返回「给人看的中文」，而是返回：
+///   key  —— 稳定标识（如 "pdf.pagerange"），前端按当前界面语言翻译
+///   args —— 占位符实参（如 { n: 7, total: 5 }）
+///   en   —— 英文兜底；前端没有该键时至少还能显示一句能懂的英文
+///
+/// 为什么不让 Rust 直接返回中文：界面支持多语言，若把文案写死在 Rust 里，
+/// 加语言就得改 Rust 并重新编译。现在翻译只在 src/i18n.js 一处。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PdfErr {
+    pub key: String,
+    pub args: Value,
+    pub en: String,
+}
+
+impl PdfErr {
+    /// 无实参的错误
+    pub fn new(key: &str, en: &str) -> Self {
+        PdfErr { key: key.into(), args: json!({}), en: en.into() }
+    }
+
+    /// 带实参的错误（args 里的键与 i18n 词典里的占位符名对应）
+    pub fn with(key: &str, args: Value, en: &str) -> Self {
+        PdfErr { key: key.into(), args, en: en.into() }
+    }
+
+    /// 纯文本描述，给单元测试与日志看（不是界面文案）
+    pub fn describe(&self) -> String {
+        if self.args == json!({}) {
+            self.en.clone()
+        } else {
+            format!("{} {}", self.key, self.args)
+        }
+    }
+}
+
+/// 页面操作统一返回：成功给 T，失败给语言无关的 PdfErr
+pub type Res<T> = Result<T, PdfErr>;
 
 /// 生成 [a, b] 的整数数组
 fn range(a: usize, b: usize) -> Vec<usize> {
@@ -15,7 +53,11 @@ fn range(a: usize, b: usize) -> Vec<usize> {
 
 fn check_page(n: usize, total: usize) -> Res<usize> {
     if n < 1 || n > total {
-        return Err(format!("页码 {} 超出范围（文档共 {} 页）", n, total));
+        return Err(PdfErr::with(
+            "pdf.pagerange",
+            json!({ "n": n, "total": total }),
+            &format!("page {} is out of range (document has {} pages)", n, total),
+        ));
     }
     Ok(n)
 }
@@ -70,7 +112,7 @@ fn parse_usize(s: &str) -> Option<usize> {
 pub fn parse_page_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
     let raw = spec.trim();
     if raw.is_empty() {
-        return Err("页码参数为空".into());
+        return Err(PdfErr::new("pdf.emptyPages", "the page parameter is empty"));
     }
     if is_all(raw) {
         return Ok(range(1, total));
@@ -85,13 +127,19 @@ pub fn parse_page_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
         }
         if let Some((a, b)) = split_pair(p) {
             if is_end_word(&b) {
-                let a = parse_usize(&a).ok_or_else(|| format!("无法识别的页码写法: \"{}\"", p))?;
+                let a = parse_usize(&a).ok_or_else(|| PdfErr::with(
+                    "pdf.badPage", json!({ "p": p }),
+                    &format!("unrecognized page syntax: \"{}\"", p),
+                ))?;
                 out.extend(range(a, total));
                 continue;
             }
             let (mut a, mut b) = match (parse_usize(&a), parse_usize(&b)) {
                 (Some(a), Some(b)) => (a, b),
-                _ => return Err(format!("无法识别的页码写法: \"{}\"", p)),
+                _ => return Err(PdfErr::with(
+                    "pdf.badPage", json!({ "p": p }),
+                    &format!("unrecognized page syntax: \"{}\"", p),
+                )),
             };
             if a > b {
                 std::mem::swap(&mut a, &mut b);
@@ -101,14 +149,17 @@ pub fn parse_page_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
         }
         match parse_usize(p) {
             Some(n) => out.push(n),
-            None => return Err(format!("无法识别的页码写法: \"{}\"", p)),
+            None => return Err(PdfErr::with(
+                "pdf.badPage", json!({ "p": p }),
+                &format!("unrecognized page syntax: \"{}\"", p),
+            )),
         }
     }
 
     out.sort_unstable();
     out.dedup();
     if out.is_empty() {
-        return Err("页码参数没有解析出任何页".into());
+        return Err(PdfErr::new("pdf.noPages", "the page parameter resolved to no pages"));
     }
     for n in &out {
         check_page(*n, total)?;
@@ -120,7 +171,7 @@ pub fn parse_page_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
 pub fn parse_order_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
     let raw = spec.trim();
     if raw.is_empty() {
-        return Err("页码参数为空".into());
+        return Err(PdfErr::new("pdf.emptyPages", "the page parameter is empty"));
     }
     if is_all(raw) {
         return Ok(range(1, total));
@@ -141,7 +192,10 @@ pub fn parse_order_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
         }
         if let Some((a, b)) = split_pair(p) {
             if is_end_word(&b) {
-                let a = parse_usize(&a).ok_or_else(|| format!("无法识别的页码写法: \"{}\"", p))?;
+                let a = parse_usize(&a).ok_or_else(|| PdfErr::with(
+                    "pdf.badPage", json!({ "p": p }),
+                    &format!("unrecognized page syntax: \"{}\"", p),
+                ))?;
                 for n in range(a, total) {
                     push(n, &mut out);
                 }
@@ -149,7 +203,10 @@ pub fn parse_order_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
             }
             let (a, b) = match (parse_usize(&a), parse_usize(&b)) {
                 (Some(a), Some(b)) => (a, b),
-                _ => return Err(format!("无法识别的页码写法: \"{}\"", p)),
+                _ => return Err(PdfErr::with(
+                    "pdf.badPage", json!({ "p": p }),
+                    &format!("unrecognized page syntax: \"{}\"", p),
+                )),
             };
             // 与桌面版一致：允许降序范围（5-3 得到 5,4,3）
             if a <= b {
@@ -165,12 +222,15 @@ pub fn parse_order_spec(spec: &str, total: usize) -> Res<Vec<usize>> {
         }
         match parse_usize(p) {
             Some(n) => push(n, &mut out),
-            None => return Err(format!("无法识别的页码写法: \"{}\"", p)),
+            None => return Err(PdfErr::with(
+                "pdf.badPage", json!({ "p": p }),
+                &format!("unrecognized page syntax: \"{}\"", p),
+            )),
         }
     }
 
     if out.is_empty() {
-        return Err("页码参数没有解析出任何页".into());
+        return Err(PdfErr::new("pdf.noPages", "the page parameter resolved to no pages"));
     }
     for n in &out {
         check_page(*n, total)?;
@@ -191,7 +251,7 @@ pub enum Position {
 pub fn parse_position(pos: &str, total: usize) -> Res<Position> {
     let s = pos.trim();
     if s.is_empty() {
-        return Err("缺少插入位置".into());
+        return Err(PdfErr::new("pdf.noPosition", "insert position is missing"));
     }
     let l = s.to_lowercase();
     if l == "head" || l == "top" || s == "首页" || s == "开头" {
@@ -217,24 +277,32 @@ pub fn parse_position(pos: &str, total: usize) -> Res<Position> {
         }
     }
     if parse_usize(s).is_some() {
-        return Err(format!("位置 \"{}\" 有歧义，请写成 before:{} 或 after:{}", s, s, s));
+        return Err(PdfErr::with(
+            "pdf.ambiguous",
+            json!({ "s": s }),
+            &format!("position \"{}\" is ambiguous; write before:{} or after:{}", s, s, s),
+        ));
     }
-    Err(format!("无法识别的插入位置: \"{}\"", s))
+    Err(PdfErr::with(
+        "pdf.badPosition",
+        json!({ "s": s }),
+        &format!("unrecognized insert position: \"{}\"", s),
+    ))
 }
 
 /* ---------------- 文档读写 ---------------- */
 
-/// 载入 PDF；失败时给出可读的中文提示
+/// 载入 PDF；失败时给出语言无关的错误（前端按当前语言渲染）
 pub fn load_doc(bytes: &[u8], label: &str) -> Res<Document> {
     Document::load_mem(bytes).map_err(|e| {
-        format!(
-            "{} 无法解析（可能是加密或损坏文件）: {}",
-            label, e
+        PdfErr::with(
+            "pdf.parse",
+            json!({ "name": label, "msg": e.to_string() }),
+            &format!("{} could not be parsed (possibly encrypted or damaged): {}", label, e),
         )
     })
 }
 
-/// 文档页数
 pub fn page_count(doc: &Document) -> usize {
     doc.get_pages().len()
 }
@@ -340,7 +408,11 @@ fn rebuild(src: &Document, order: &[usize]) -> Res<Document> {
     for n in order {
         let id = *src_pages
             .get(n - 1)
-            .ok_or_else(|| format!("页码 {} 超出范围（文档共 {} 页）", n, src_pages.len()))?;
+            .ok_or_else(|| PdfErr::with(
+                "pdf.pagerange",
+                json!({ "n": *n, "total": src_pages.len() }),
+                &format!("page {} is out of range (document has {} pages)", n, src_pages.len()),
+            ))?;
         ids.push(id);
     }
     // 深拷贝页面及其引用到的资源，避免两个文档共享对象编号导致内容错乱
@@ -357,7 +429,11 @@ fn rebuild(src: &Document, order: &[usize]) -> Res<Document> {
             .get_object(old)
             .and_then(|o| o.as_dict())
             .cloned()
-            .map_err(|e| format!("读取页面对象失败: {}", e))?;
+            .map_err(|e| PdfErr::with(
+            "pdf.readPage",
+            json!({ "msg": e.to_string() }),
+            &format!("failed to read a page object: {}", e),
+        ))?;
         // 页面对象放进新文档时统一给新编号，避免和旧文档的编号体系冲突
         let new_id = out.new_object_id();
         page.set("Parent", Object::Reference(pages_id));
@@ -387,7 +463,11 @@ fn rebuild(src: &Document, order: &[usize]) -> Res<Document> {
 fn to_bytes(mut doc: Document) -> Res<Vec<u8>> {
     let mut buf = Vec::new();
     doc.save_to(&mut buf)
-        .map_err(|e| format!("生成 PDF 失败: {}", e))?;
+        .map_err(|e| PdfErr::with(
+            "pdf.write",
+            json!({ "msg": e.to_string() }),
+            &format!("failed to generate the PDF: {}", e),
+        ))?;
     Ok(buf)
 }
 
@@ -400,7 +480,7 @@ pub fn delete_pages(base: &[u8], spec: &str) -> Res<Vec<u8>> {
     let del = parse_page_spec(spec, total)?;
     let keep: Vec<usize> = range(1, total).into_iter().filter(|n| !del.contains(n)).collect();
     if keep.is_empty() {
-        return Err("不能删除全部页面，结果 PDF 会没有任何页".into());
+        return Err(PdfErr::new("pdf.delAll", "cannot delete every page; the result would have no pages"));
     }
     to_bytes(rebuild(&src, &keep)?)
 }
@@ -411,7 +491,7 @@ pub fn reorder_pages(base: &[u8], spec: &str) -> Res<(Vec<u8>, Vec<usize>, Vec<u
     let total = page_count(&src);
     let given = parse_order_spec(spec, total)?;
     if given.len() < 2 {
-        return Err("排序至少需要 2 页".into());
+        return Err(PdfErr::new("pdf.need2", "reordering needs at least 2 pages"));
     }
     let rest: Vec<usize> = range(1, total)
         .into_iter()
@@ -434,7 +514,7 @@ pub fn extract_pages(base: &[u8], spec: &str) -> Res<Vec<u8>> {
 pub fn rotate_pages(base: &[u8], spec: &str, angle: i64) -> Res<Vec<u8>> {
     let a = ((angle % 360) + 360) % 360;
     if a != 90 && a != 180 && a != 270 {
-        return Err("旋转角度只能是 90 / 180 / 270".into());
+        return Err(PdfErr::new("pdf.angle", "rotation angle must be 90 / 180 / 270"));
     }
     let src = load_doc(base, "PDF")?;
     let total = page_count(&src);
@@ -476,7 +556,7 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
         _ => range(1, add_total),
     };
     if pick.is_empty() {
-        return Err("待插入 PDF 没有可插入的页".into());
+        return Err(PdfErr::new("pdf.insertEmpty", "the PDF to insert has no insertable pages"));
     }
 
     // 目标文档先整体重建，再把待插页按顺序拼进去
@@ -489,12 +569,20 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
     for n in &pick {
         let old = *add_pages
             .get(n - 1)
-            .ok_or_else(|| format!("页码 {} 超出范围（文档共 {} 页）", n, add_pages.len()))?;
+            .ok_or_else(|| PdfErr::with(
+                "pdf.pagerange",
+                json!({ "n": *n, "total": add_pages.len() }),
+                &format!("page {} is out of range (document has {} pages)", n, add_pages.len()),
+            ))?;
         let mut page = ins
             .get_object(old)
             .and_then(|o| o.as_dict())
             .cloned()
-            .map_err(|e| format!("读取待插入页面失败: {}", e))?;
+            .map_err(|e| PdfErr::with(
+            "pdf.readInsertPage",
+            json!({ "msg": e.to_string() }),
+            &format!("failed to read a page to insert: {}", e),
+        ))?;
         // 插入页引用到的资源（字体、图片、内容流）也要一起带过来
         copy_referenced(&ins, &mut out, &mut page)?;
         let new_id = out.new_object_id();
@@ -513,10 +601,10 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
                 .and_then(|o| o.as_reference());
             match pages_ref {
                 Ok(id) => id,
-                Err(_) => return Err("重建后的 PDF 缺少页面树".into()),
+                Err(_) => return Err(PdfErr::new("pdf.noPageTree", "the rebuilt PDF is missing its page tree")),
             }
         }
-        Err(_) => return Err("重建后的 PDF 缺少 Catalog".into()),
+        Err(_) => return Err(PdfErr::new("pdf.noCatalog", "the rebuilt PDF is missing its Catalog")),
     };
 
     let mut kids: Vec<Object> = out
@@ -667,8 +755,8 @@ mod tests {
 
     #[test]
     fn parse_page_spec_errors() {
-        assert!(parse_page_spec("99", 5).unwrap_err().contains("超出范围"));
-        assert!(parse_page_spec("abc", 5).unwrap_err().contains("无法识别"));
+        assert_eq!(parse_page_spec("99", 5).unwrap_err().key, "pdf.pagerange");
+        assert_eq!(parse_page_spec("abc", 5).unwrap_err().key, "pdf.badPage");
         assert!(parse_page_spec("", 5).is_err());
     }
 
@@ -685,7 +773,7 @@ mod tests {
         assert_eq!(parse_position("尾页", 5).unwrap(), Position::Tail);
         assert_eq!(parse_position("before:3", 5).unwrap(), Position::Before(3));
         assert_eq!(parse_position("after:4", 5).unwrap(), Position::After(4));
-        assert!(parse_position("3", 5).unwrap_err().contains("歧义"));
+        assert_eq!(parse_position("3", 5).unwrap_err().key, "pdf.ambiguous");
     }
 
     #[test]
@@ -698,7 +786,7 @@ mod tests {
     #[test]
     fn delete_all_is_rejected() {
         let pdf = make_pdf(3);
-        assert!(delete_pages(&pdf, "all").unwrap_err().contains("不能删除全部页面"));
+        assert_eq!(delete_pages(&pdf, "all").unwrap_err().key, "pdf.delAll");
     }
 
     #[test]

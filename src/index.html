@@ -3,91 +3,92 @@
 <head>
 <meta charset="utf-8" />
 <!-- CSP 由 src-tauri/tauri.conf.json 统一声明（需要放行 ipc: 供 Tauri IPC 使用） -->
-<title>PDFRev - PDF 页面修改器</title>
+<title data-i18n="app.title">PDFRev - PDF 页面修改器</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <div id="app">
   <header class="toolbar">
-    <button id="btnOpen" class="primary">打开 PDF</button>
-    <button id="btnSave" disabled>保存</button>
-    <button id="btnSaveAs" disabled>另存为</button>
+    <button id="btnOpen" class="primary" data-i18n="tb.open">打开 PDF</button>
+    <button id="btnSave" disabled data-i18n="tb.save">保存</button>
+    <button id="btnSaveAs" disabled data-i18n="tb.saveAs">另存为</button>
     <span class="sep"></span>
-    <button id="btnUndo" disabled title="Ctrl+Z">撤销</button>
+    <button id="btnUndo" disabled data-i18n="tb.undo" data-i18n-title="tb.undoTip" title="撤销上一步（Ctrl+Z）">撤销</button>
     <img class="brand-icon" src="assets/pdfrev_icon.png" alt="" /><div class="brand">PDFRev</div>
-    <button id="btnCopyright" class="mini" title="查看版权与使用许可">版权</button>
-    <span class="fileinfo" id="fileInfo">未打开文件</span>
+    <select id="langSelect" class="lang" data-i18n-title="tb.langTip" data-i18n-aria="tb.langAria" title="界面语言"></select>
+    <button id="btnCopyright" class="mini" data-i18n="tb.copyright" data-i18n-title="tb.copyrightTip" title="查看版权与使用许可">版权</button>
+    <span class="fileinfo" id="fileInfo" data-i18n="file.none">未打开文件</span>
   </header>
 
   <main>
     <section class="pages" id="pagesPane">
       <div class="pane-head">
-        <span class="title">页面</span>
+        <span class="title" data-i18n="pages.title">页面</span>
         <span class="muted" id="pageCount"></span>
         <span class="spacer"></span>
-        <button id="btnSelectAll" class="mini">全选</button>
-        <button id="btnSelectNone" class="mini">清空选择</button>
-        <button id="btnSelectInvert" class="mini">反选</button>
+        <button id="btnSelectAll" class="mini" data-i18n="pages.selectAll">全选</button>
+        <button id="btnSelectNone" class="mini" data-i18n="pages.selectNone">清空选择</button>
+        <button id="btnSelectInvert" class="mini" data-i18n="pages.selectInvert">反选</button>
       </div>
       <div id="thumbs" class="thumbs">
-        <div class="empty">打开一个 PDF 开始</div>
+        <div class="empty" data-i18n="pages.empty">打开一个 PDF 开始</div>
       </div>
       <div class="pane-foot">
-        <button id="btnRotateLeft" disabled title="选中页逆时针旋转 90°">↺ 左转</button>
-        <button id="btnRotateRight" disabled title="选中页顺时针旋转 90°">↻ 右转</button>
-        <button id="btnDeleteSel" class="danger" disabled>删除选中页</button>
+        <button id="btnRotateLeft" disabled data-i18n="pages.rotateLeft" data-i18n-title="pages.rotateLeftTip" title="选中页逆时针旋转 90°">↺ 左转</button>
+        <button id="btnRotateRight" disabled data-i18n="pages.rotateRight" data-i18n-title="pages.rotateRightTip" title="选中页顺时针旋转 90°">↻ 右转</button>
+        <button id="btnDeleteSel" class="danger" disabled data-i18n="pages.deleteSel">删除选中页</button>
         <span class="spacer"></span>
-        <span class="muted" id="selInfo">已选 0 页</span>
+        <span class="muted" id="selInfo" data-i18n="pages.selInfo">已选 0 页</span>
       </div>
     </section>
 
     <aside class="side">
       <div class="card">
-        <h3>按页码操作</h3>
-        <label>页码表达式</label>
-        <input id="exprPages" placeholder="如 2  或  3,5,8  或  3-5  或  5-end" />
+        <h3 data-i18n="card.expr.title">按页码操作</h3>
+        <label data-i18n="card.expr.label">页码表达式</label>
+        <input id="exprPages" data-i18n-ph="card.expr.ph" placeholder="如 2  或  3,5,8  或  3-5  或  5-end" />
         <div class="row">
-          <button id="btnExprDelete" disabled>删除这些页</button>
-          <button id="btnExprExtract" disabled>提取为新 PDF</button>
+          <button id="btnExprDelete" disabled data-i18n="card.expr.del">删除这些页</button>
+          <button id="btnExprExtract" disabled data-i18n="card.expr.extract">提取为新 PDF</button>
         </div>
       </div>
 
       <div class="card">
-        <h3>页面排序</h3>
-        <label>新顺序（逗号分隔的页码）</label>
-        <input id="orderInput" placeholder="如 3,1,2,4-6（未列出的页自动排到末尾）" />
+        <h3 data-i18n="card.order.title">页面排序</h3>
+        <label data-i18n="card.order.label">新顺序（逗号分隔的页码）</label>
+        <input id="orderInput" data-i18n-ph="card.order.ph" placeholder="如 3,1,2,4-6（未列出的页自动排到末尾）" />
         <div class="row">
-          <button id="btnApplyOrder" disabled>应用排序</button>
-          <button id="btnReverse" disabled>反转全部页序</button>
+          <button id="btnApplyOrder" disabled data-i18n="card.order.apply">应用排序</button>
+          <button id="btnReverse" disabled data-i18n="card.order.reverse">反转全部页序</button>
         </div>
-        <p class="hint">也可以直接拖动左侧缩略图调整顺序。</p>
+        <p class="hint" data-i18n="card.order.hint">也可以直接拖动左侧缩略图调整顺序。</p>
       </div>
 
       <div class="card">
-        <h3>插入另一个 PDF</h3>
+        <h3 data-i18n="card.ins.title">插入另一个 PDF</h3>
         <div class="row">
-          <button id="btnPickInsert">选择要插入的 PDF…</button>
-          <button id="btnInsert" class="primary" disabled>插入</button>
+          <button id="btnPickInsert" data-i18n="card.ins.pick">选择要插入的 PDF…</button>
+          <button id="btnInsert" class="primary" disabled data-i18n="card.ins.go">插入</button>
         </div>
-        <p class="muted" id="insertFile">未选择文件</p>
-        <label>插入位置</label>
+        <p class="muted" id="insertFile" data-i18n="card.ins.none">未选择文件</p>
+        <label data-i18n="card.ins.atLabel">插入位置</label>
         <select id="insertAt">
-          <option value="head">首页（最前面）</option>
-          <option value="tail">尾页（最后面）</option>
-          <option value="custom">自定义…</option>
+          <option value="head" data-i18n="card.ins.atHead">首页（最前面）</option>
+          <option value="tail" data-i18n="card.ins.atTail">尾页（最后面）</option>
+          <option value="custom" data-i18n="card.ins.atCustom">自定义…</option>
         </select>
-        <input id="insertAtCustom" placeholder="如 before:3 / after:4 / head / tail" style="display:none" />
-        <label>插入该文件的哪些页（可留空 = 全部）</label>
-        <input id="insertPages" placeholder="如 1-2 或 3" />
+        <input id="insertAtCustom" data-i18n-ph="card.ins.atPh" placeholder="如 before:3 / after:4 / head / tail" style="display:none" />
+        <label data-i18n="card.ins.pagesLabel">插入该文件的哪些页（可留空 = 全部）</label>
+        <input id="insertPages" data-i18n-ph="card.ins.pagesPh" placeholder="如 1-2 或 3" />
       </div>
 
       <div class="card cli">
-        <h3>命令行等价</h3>
-        <pre id="cliOut">拖拽或点击操作后，这里显示对应的 pdfrev 命令。</pre>
+        <h3 data-i18n="card.cli.title">命令行等价</h3>
+        <pre id="cliOut" data-i18n="card.cli.out">拖拽或点击操作后，这里显示对应的 pdfrev 命令。</pre>
         <div class="row">
-          <button id="btnCopyCli" class="mini">复制命令</button>
-          <button id="btnCopyCliJson" class="mini">复制 JSON</button>
-          <button id="btnCliHelp" class="mini" title="查看 pdfrev 命令行的全部参数与示例">帮助</button>
+          <button id="btnCopyCli" class="mini" data-i18n="card.cli.copyCmd">复制命令</button>
+          <button id="btnCopyCliJson" class="mini" data-i18n="card.cli.copyJson">复制 JSON</button>
+          <button id="btnCliHelp" class="mini" data-i18n="card.cli.help" data-i18n-title="card.cli.helpTip" title="查看 pdfrev 命令行的全部参数与示例">帮助</button>
         </div>
       </div>
     </aside>
@@ -99,34 +100,34 @@
   <div id="dropzone" class="dropzone hidden">
     <div class="dz-box">
       <div class="dz-icon">PDF</div>
-      <div class="dz-text">松开以打开 PDF</div>
-      <div class="dz-hint">也可以拖到窗口任意位置</div>
+      <div class="dz-text" data-i18n="drop.text">松开以打开 PDF</div>
+      <div class="dz-hint" data-i18n="drop.hint">也可以拖到窗口任意位置</div>
     </div>
   </div>
 
   <!-- 页面预览：双击缩略图打开，Delete 删除当前页 -->
   <div id="preview" class="preview hidden">
     <div class="pv-bar">
-      <span class="pv-title" id="pvTitle">第 1 页</span>
+      <span class="pv-title" id="pvTitle" data-i18n="pv.page">第 1 页</span>
       <span class="spacer"></span>
-      <button id="pvPrev" class="mini">← 上一页</button>
-      <button id="pvNext" class="mini">下一页 →</button>
+      <button id="pvPrev" class="mini" data-i18n="pv.prev">← 上一页</button>
+      <button id="pvNext" class="mini" data-i18n="pv.next">下一页 →</button>
       <span class="pv-zoom">
-        <button id="pvZoomOut" class="mini" title="缩小（滚轮向下 / Ctrl+-）">−</button>
-        <button id="pvZoomFit" class="mini" title="适应窗口（Ctrl+0）">适应</button>
-        <button id="pvZoom100" class="mini" title="实际大小 100%（Ctrl+1）">100%</button>
-        <button id="pvZoomIn" class="mini" title="放大（滚轮向上 / Ctrl++）">+</button>
+        <button id="pvZoomOut" class="mini" data-i18n-title="pv.zoomOutTip" title="缩小（滚轮向下 / Ctrl+-）">−</button>
+        <button id="pvZoomFit" class="mini" data-i18n="pv.zoomFit" data-i18n-title="pv.zoomFitTip" title="适应窗口（Ctrl+0）">适应</button>
+        <button id="pvZoom100" class="mini" data-i18n-title="pv.zoom100Tip" title="实际大小 100%（Ctrl+1）">100%</button>
+        <button id="pvZoomIn" class="mini" data-i18n-title="pv.zoomInTip" title="放大（滚轮向上 / Ctrl++）">+</button>
         <span class="pv-zoomval" id="pvZoomVal">100%</span>
       </span>
-      <button id="pvDelete" class="danger">删除此页 (Delete)</button>
-      <button id="pvClose" class="mini">关闭 (Esc)</button>
+      <button id="pvDelete" class="danger" data-i18n="pv.delete">删除此页 (Delete)</button>
+      <button id="pvClose" class="mini" data-i18n="pv.close">关闭 (Esc)</button>
     </div>
     <div class="pv-stage" id="pvStage">
       <canvas id="pvCanvas"></canvas>
-      <div class="pv-loading hidden" id="pvLoading">渲染中…</div>
+      <div class="pv-loading hidden" id="pvLoading" data-i18n="pv.loading">渲染中…</div>
     </div>
     <div class="pv-foot">
-      <span class="muted">滚轮缩放（或 Ctrl+滚轮）· 双击空白关闭 · Delete 删除本页 · ← → 翻页 · Esc 关闭</span>
+      <span class="muted" data-i18n="pv.foot">滚轮缩放（或 Ctrl+滚轮）· 双击空白关闭 · Delete 删除本页 · ← → 翻页 · Esc 关闭</span>
     </div>
   </div>
 
@@ -134,8 +135,8 @@
   <div id="cliHelp" class="cli-help hidden">
     <div class="ch-box">
       <div class="ch-head">
-        <h2 class="ch-title">pdfrev 命令行帮助</h2>
-        <button id="chClose" class="mini">关闭 (Esc)</button>
+        <h2 class="ch-title" data-i18n="ch.title">pdfrev 命令行帮助</h2>
+        <button id="chClose" class="mini" data-i18n="ch.close">关闭 (Esc)</button>
       </div>
       <div class="ch-body" id="chBody"></div>
     </div>
@@ -146,8 +147,8 @@
     <div class="cf-box">
       <div class="cf-msg" id="confirmMsg"></div>
       <div class="cf-btns">
-        <button id="confirmCancel">取消</button>
-        <button id="confirmOk" class="primary">确定</button>
+        <button id="confirmCancel" data-i18n="cf.cancel">取消</button>
+        <button id="confirmOk" class="primary" data-i18n="cf.ok">确定</button>
       </div>
     </div>
   </div>
@@ -155,27 +156,24 @@
   <div id="copyright" class="copyright hidden">
     <div class="cr-box">
       <img class="cr-logo" src="assets/pdfrev_logo.png" alt="PDFRev" />
-      <h2 class="cr-title">MIT 开源许可</h2>
-      <p class="cr-holder">版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）</p>
-      <p class="cr-license">本软件以 <b>MIT License</b> 发布，全文见 <code>LICENSE</code>。</p>
-      <ol class="cr-list">
-        <li><b>授予的权利：</b>任何人可免费获得本软件及文档的副本，不受限制地使用、复制、修改、合并、发布、分发、再授权和/或销售本软件，但须遵守下列条件。</li>
-        <li><b>保留声明：</b>上述版权声明与本许可声明必须包含在本软件的所有副本或主要部分中。</li>
-        <li><b>免责声明：</b>本软件按「原样」提供，不附带任何明示或默示的担保，包括但不限于对适销性、特定用途适用性和非侵权的担保。</li>
-        <li><b>责任限制：</b>作者或版权持有人不对任何索赔、损害或其他责任负责，无论该责任源于合同、侵权或其他方式，亦无论是否与软件或软件的使用或其他交易有关。</li>
-      </ol>
+      <h2 class="cr-title" data-i18n="cr.title">MIT 开源许可</h2>
+      <p class="cr-holder" data-i18n="cr.holder">版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）</p>
+      <p class="cr-license" data-i18n-html="cr.licenseHtml">本软件以 <b>MIT License</b> 发布，全文见 <code>LICENSE</code>。</p>
+      <!-- 条款文本由 i18n 词典填充（cr.c1k/c1t … cr.c4k/c4t），这里只留空壳 -->
+      <ol class="cr-list"></ol>
       <details class="cr-full">
-        <summary>展开 MIT 许可全文</summary>
+        <summary data-i18n="cr.expand">展开 MIT 许可全文</summary>
         <pre id="crFull"></pre>
       </details>
       <div class="cr-btns">
-        <button id="crClose" class="primary">关闭</button>
+        <button id="crClose" class="primary" data-i18n="cr.close">关闭</button>
       </div>
     </div>
   </div>
   <!-- /版权与许可 -->
 </div>
 <script src="vendor/pdf.js"></script>
+  <script src="i18n.js"></script>
 <script src="bridge-tauri.js"></script>
 <script src="selfcheck.js"></script>
 <script src="app.js"></script>

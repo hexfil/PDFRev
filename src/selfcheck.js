@@ -210,17 +210,18 @@
         bcs ? bcs.fontSize : '无 .brand');
       put('顶栏标题字重加粗（>=800）', !!bcs && parseInt(bcs.fontWeight, 10) >= 800,
         bcs ? bcs.fontWeight : '无 .brand');
-      /* 静态标记与 JS 常量必须一致：index.html 里的占位文本是给「JS 没跑起来」
-         时兜底用的，如果两者漂移，用户看到的会是错的内容。 */
-      put('静态标记与 JS 常量一致（标题/版权行/四条要点）',
+      /* 版权页内容必须与 i18n 词典一致：文案只有词典一个来源，
+         如果两者漂移，说明有地方把中文字面量又写死回去了。 */
+      put('版权页内容与 i18n 词典一致（标题/版权行/四条要点）',
         (() => {
-          const t = document.querySelector('#copyright .cr-title').textContent;
-          const h = document.querySelector('#copyright .cr-holder').textContent;
+          const title = document.querySelector('#copyright .cr-title').textContent;
+          const holder = document.querySelector('#copyright .cr-holder').textContent;
           const lis = Array.from(document.querySelectorAll('#copyright .cr-list li'))
             .map((li) => li.textContent);
-          return t === COPYRIGHT_TITLE && h === COPYRIGHT_HOLDER &&
-            lis.length === COPYRIGHT_CLAUSES.length &&
-            lis.every((s, i) => s === COPYRIGHT_CLAUSES[i].k + '：' + COPYRIGHT_CLAUSES[i].t);
+          const sep = t('cr.sep');
+          return title === t('cr.title') && holder === t('cr.holder') &&
+            lis.length === 4 &&
+            lis.every((s, i) => s === t('cr.c' + (i + 1) + 'k') + sep + t('cr.c' + (i + 1) + 't'));
         })(),
         '');
 
@@ -484,6 +485,79 @@
       } catch (e) {
         put('窗口已置前（供外部截屏）', false, String(e));
       }
+
+      /* ---------- 16.7 国际化（i18n） ----------
+         放在最后：切语言会改掉界面上几乎所有文案，前面那些
+         断言中文的检查项必须在语言还是中文的时候跑完。 */
+      const sel = $('langSelect');
+      put('顶栏有语言选择框', !!sel && sel.tagName === 'SELECT');
+      put('语言选择框有 2 个选项（简体中文 / English）',
+        !!sel && sel.options.length === 2, sel ? String(sel.options.length) : '无');
+      put('语言选项用各自语言的名字（切到英文也认得出来）',
+        !!sel && Array.from(sel.options).map((o) => o.textContent).join('|') === '简体中文|English',
+        sel ? Array.from(sel.options).map((o) => o.textContent).join('|') : '无');
+
+      /* 静态标记必须全部能查到词条：data-i18n 的值就是键，
+         如果词条缺失，applyI18n 会把键名本身写进界面（看起来像乱码）。 */
+      const marked = Array.from(document.querySelectorAll('[data-i18n],[data-i18n-html],[data-i18n-title],[data-i18n-ph],[data-i18n-aria]'));
+      const missingKey = [];
+      for (const el of marked) {
+        for (const attr of ['data-i18n', 'data-i18n-html', 'data-i18n-title', 'data-i18n-ph', 'data-i18n-aria']) {
+          const k = el.getAttribute(attr);
+          if (k && t(k) === k) missingKey.push(attr + '=' + k);
+        }
+      }
+      put('所有 data-i18n 标记都能查到词条（界面不会露出键名）',
+        missingKey.length === 0, missingKey.slice(0, 5).join(', '));
+      put('静态标记覆盖到工具栏/页面面板/右侧卡片/预览/帮助/版权',
+        marked.length >= 50, String(marked.length) + ' 处');
+
+      /* 切到英文：按钮、顶栏文件信息、版权页条款都要跟着变 */
+      const zhOpen = $('btnOpen').textContent;
+      setLang('en');
+      await wait(300);
+      put('切到英文后按钮文案变英文', $('btnOpen').textContent === 'Open PDF',
+        $('btnOpen').textContent);
+      put('切到英文后 <html lang> 变为 en', document.documentElement.lang === 'en',
+        document.documentElement.lang);
+      put('切到英文后标签也变（「页面」-> Pages）',
+        document.querySelector('#pagesPane .title').textContent === 'Pages',
+        document.querySelector('#pagesPane .title').textContent);
+
+      openCopyright();
+      await wait(200);
+      const enItems = Array.from(document.querySelectorAll('#copyright .cr-list li')).map((li) => li.textContent);
+      put('切到英文后版权页标题与条款变英文',
+        document.querySelector('#copyright .cr-title').textContent === 'MIT License' &&
+        enItems.length === 4 && enItems[0].indexOf('Granted rights') === 0,
+        document.querySelector('#copyright .cr-title').textContent + ' | ' + (enItems[0] || '').slice(0, 24));
+      $('crClose').click();
+      await wait(200);
+
+      put('切到英文后页数文案变英文（pages）',
+        /pages/.test(document.querySelector('#fileInfo .fi-main').textContent),
+        document.querySelector('#fileInfo .fi-main').textContent);
+      put('切到英文后语言选择已记住（localStorage）',
+        (() => { try { return localStorage.getItem('pdfrev.lang') === 'en'; } catch (e) { return false; } })(),
+        (() => { try { return String(localStorage.getItem('pdfrev.lang')); } catch (e) { return '无'; } })());
+
+      /* 后端错误也要跟着语言走：Rust 只给 ekey，文案在这里翻 */
+      put('后端错误按当前语言渲染（英文）',
+        tErr({ ok: false, code: 'PDF', ekey: 'pdf.pagerange', eargs: { n: 9, total: 3 } })
+          === 'Page 9 is out of range (the document has 3 pages)',
+        tErr({ ok: false, code: 'PDF', ekey: 'pdf.pagerange', eargs: { n: 9, total: 3 } }));
+
+      /* 切回中文：后面的收尾检查（以及用户下次打开）回到默认语言 */
+      setLang('zh');
+      await wait(300);
+      put('切回中文后按钮文案复原', $('btnOpen').textContent === '打开 PDF',
+        $('btnOpen').textContent);
+      put('切回中文后 <html lang> 复原', document.documentElement.lang === 'zh-CN',
+        document.documentElement.lang);
+      put('语言切换后缩略图角标也重画（无残留英文）',
+        Array.from(document.querySelectorAll('#thumbs .thumb .chk')).every((c) => !/^Select page/.test(c.title)),
+        '');
+      put('切语言不改变已打开文档的页数', window.__state.total > 0, String(window.__state.total));
 
       /* ---------- 17. 无未捕获错误 ---------- */
       put('渲染进程无未捕获错误', (window.__errs || []).length === 0,

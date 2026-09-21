@@ -15,61 +15,156 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, Window};
 
 /// 统一的返回形状，和桌面版 `guard()` 一致：
-///   { ok: true, ... }  或  { ok: false, code, error }
+///   { ok: true, ... }  或  { ok: false, code, error, ekey?, eargs? }
+///
+/// 关于多语言：Rust 侧不再生产「中文文案」，只给语言无关的
+///   ekey  —— 稳定键（如 "io.eacces"），前端按当前界面语言翻译
+///   eargs —— 占位符实参（如 { path: "C:\\a.pdf" }）
+/// error 仍然保留，作为没有 ekey 时的原始兜底文本（老行为）。
+/// 这样加语言只要改前端 src/i18n.js，不用动 Rust 也不用重编译。
 #[derive(Serialize)]
 struct ErrPayload {
     ok: bool,
     code: String,
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ekey: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eargs: Option<serde_json::Value>,
 }
 
-fn err<T: Serialize>(code: &str, msg: impl Into<String>) -> Result<T, ErrPayload> {
-    Err(ErrPayload {
-        ok: false,
-        code: code.to_string(),
-        error: msg.into(),
-    })
+impl ErrPayload {
+    /// 无翻译键的兜底错误（error 直接显示）
+    fn raw(code: &str, msg: impl Into<String>) -> Self {
+        ErrPayload {
+            ok: false,
+            code: code.to_string(),
+            error: msg.into(),
+            ekey: None,
+            eargs: None,
+        }
+    }
+
+    /// explain_io 出来的一组值 -> ErrPayload（ekey 为空则退化成 raw）
+    fn keyed_or_raw(code: String, ekey: String, eargs: serde_json::Value, en: String) -> Self {
+        if ekey.is_empty() {
+            ErrPayload::raw(&code, en)
+        } else {
+            ErrPayload::keyed(&code, &ekey, eargs, en)
+        }
+    }
+
+    /// 带翻译键的错误
+    fn keyed(
+        code: &str,
+        ekey: &str,
+        eargs: serde_json::Value,
+        en: impl Into<String>,
+    ) -> Self {
+        ErrPayload {
+            ok: false,
+            code: code.to_string(),
+            error: en.into(),
+            ekey: Some(ekey.to_string()),
+            eargs: Some(eargs),
+        }
+    }
 }
 
-/// 把 std::io::Error 翻译成用户能看懂的中文（对应 explainFsError）
-fn explain_io(e: &std::io::Error, abs: &Path, adding: bool) -> (String, String) {
+/// 把 pdfops 的语言无关错误原样搬进 IPC 返回（键与实参一起给前端）
+impl From<pdfops::PdfErr> for ErrPayload {
+    fn from(e: pdfops::PdfErr) -> Self {
+        ErrPayload {
+            ok: false,
+            code: "PDF".into(),
+            error: e.describe(),
+            ekey: Some(e.key),
+            eargs: Some(e.args),
+        }
+    }
+}
+
+
+/// 没有 ekey 时前端会退回 error 原文，所以这里给一句能懂的英文兜底
+fn err_keyed<T: Serialize>(
+    code: &str,
+    ekey: &str,
+    eargs: serde_json::Value,
+    en: &str,
+) -> Result<T, ErrPayload> {
+    Err(ErrPayload::keyed(code, ekey, eargs, en))
+}
+
+/// 把 std::io::Error 归类成语言无关的 (code, ekey, eargs, en)
+/// （对应桌面版的 explainFsError；文案本身在前端 i18n 词典里）
+fn explain_io(e: &std::io::Error, abs: &Path, adding: bool) -> (String, String, serde_json::Value, String) {
     let dir = abs
         .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
+    let path = abs.display().to_string();
+    let act = if adding { "create" } else { "saveTo" };
     match e.kind() {
         std::io::ErrorKind::PermissionDenied => (
             "EACCES".into(),
-            format!(
-                "没有写入权限，无法{} {}。若是系统保护目录，请改用「另存为」保存到文档或桌面。",
-                if adding { "创建" } else { "保存到" },
-                abs.display()
-            ),
+            "io.eacces".into(),
+            serde_json::json!({ "act": act, "path": path }),
+            format!("no write permission, cannot {} {}", act, path),
         ),
         std::io::ErrorKind::NotFound => (
             "ENOENT".into(),
-            format!("目标目录不存在：{}", dir),
+            "io.enotfound".into(),
+            serde_json::json!({ "dir": dir }),
+            format!("target directory does not exist: {}", dir),
         ),
         std::io::ErrorKind::AlreadyExists => (
             "ENOTDIR".into(),
-            format!("保存路径不合法（上级路径不是文件夹）：{}", abs.display()),
+            "io.enotdir".into(),
+            serde_json::json!({ "path": path }),
+            format!("invalid save path (a parent path is not a folder): {}", path),
         ),
         _ => {
             let raw = e.to_string();
             // Windows 上磁盘满 / 只读盘会走这里，按关键字兜一下
             if raw.contains("os error 112") {
-                ("ENOSPC".into(), "磁盘空间不足，无法保存。".into())
+                (
+                    "ENOSPC".into(),
+                    "io.enospc".into(),
+                    serde_json::json!({}),
+                    "not enough disk space to save".into(),
+                )
             } else if raw.contains("os error 19") || raw.contains("os error 30") {
-                ("EROFS".into(), format!("目标磁盘是只读的，无法写入：{}", dir))
+                (
+                    "EROFS".into(),
+                    "io.erofs".into(),
+                    serde_json::json!({ "dir": dir }),
+                    format!("the target disk is read-only, cannot write: {}", dir),
+                )
             } else if raw.contains("os error 32") {
                 (
                     "EBUSY".into(),
-                    "文件正被其他程序占用（可能已在 PDF 阅读器中打开），请关闭后重试。".into(),
+                    "io.ebusy".into(),
+                    serde_json::json!({}),
+                    "the file is in use by another program".into(),
                 )
             } else {
-                ("".into(), raw)
+                ("".into(), "".into(), serde_json::json!({}), raw)
             }
         }
+    }
+}
+
+/// explain_io 之后统一造 ErrPayload（ekey 为空表示只能用原始文本）
+fn io_err<T: Serialize>(
+    code: &str,
+    ekey: &str,
+    eargs: serde_json::Value,
+    en: &str,
+) -> Result<T, ErrPayload> {
+    if ekey.is_empty() {
+        Err(ErrPayload::raw(code, en))
+    } else {
+        Err(ErrPayload::keyed(code, ekey, eargs, en))
     }
 }
 
@@ -97,12 +192,11 @@ fn write_file_safe(abs: &Path, data: &[u8], unlock: bool) -> Result<SaveResult, 
     let mut cleared = false;
     if is_readonly(abs) {
         if !unlock {
-            return err(
+            return err_keyed(
                 "READONLY",
-                format!(
-                    "文件是只读的，无法覆盖保存：{}。是否清除只读属性后覆盖？",
-                    abs.display()
-                ),
+                "readonly.ask",
+                serde_json::json!({ "path": abs.display().to_string() }),
+                &format!("the file is read-only and cannot be overwritten: {}. Clear the read-only flag and overwrite?", abs.display()),
             );
         }
         match fs::metadata(abs) {
@@ -111,14 +205,14 @@ fn write_file_safe(abs: &Path, data: &[u8], unlock: bool) -> Result<SaveResult, 
                 #[allow(clippy::permissions_set_readonly_false)]
                 perm.set_readonly(false);
                 if let Err(e) = fs::set_permissions(abs, perm) {
-                    let (c, m) = explain_io(&e, abs, false);
-                    return err(&c, m);
+                    let (c, k, a, m) = explain_io(&e, abs, false);
+                    return io_err(&c, &k, a, &m);
                 }
                 cleared = true;
             }
             Err(e) => {
-                let (c, m) = explain_io(&e, abs, false);
-                return err(&c, m);
+                let (c, k, a, m) = explain_io(&e, abs, false);
+                return io_err(&c, &k, a, &m);
             }
         }
     }
@@ -132,13 +226,13 @@ fn write_file_safe(abs: &Path, data: &[u8], unlock: bool) -> Result<SaveResult, 
 
     if let Err(e) = fs::write(&tmp, data) {
         let _ = fs::remove_file(&tmp);
-        let (c, m) = explain_io(&e, abs, false);
-        return err(&c, m);
+        let (c, k, a, m) = explain_io(&e, abs, false);
+        return io_err(&c, &k, a, &m);
     }
     if let Err(e) = fs::rename(&tmp, abs) {
         let _ = fs::remove_file(&tmp);
-        let (c, m) = explain_io(&e, abs, false);
-        return err(&c, m);
+        let (c, k, a, m) = explain_io(&e, abs, false);
+        return io_err(&c, &k, a, &m);
     }
     let size = fs::metadata(abs).map(|m| m.len()).unwrap_or(0);
     Ok(SaveResult {
@@ -210,10 +304,13 @@ struct SaveAsResult {
 
 fn decode_b64(s: &str) -> Result<Vec<u8>, ErrPayload> {
     B64.decode(s.as_bytes())
-        .map_err(|e| ErrPayload {
-            ok: false,
-            code: "DECODE".into(),
-            error: format!("数据解码失败: {}", e),
+        .map_err(|e| {
+            ErrPayload::keyed(
+                "DECODE",
+                "pdf.b64",
+                serde_json::json!({ "msg": e.to_string() }),
+                &format!("data decoding failed: {}", e),
+            )
         })
 }
 
@@ -247,15 +344,15 @@ async fn open_pdf(window: Window) -> Result<OpenResult, ErrPayload> {
         let meta = match fs::metadata(&path) {
             Ok(m) => m,
             Err(e) => {
-                let (c, m) = explain_io(&e, &path, false);
-                return err(&c, m);
+                let (c, k, a, m) = explain_io(&e, &path, false);
+                return io_err(&c, &k, a, &m);
             }
         };
         let data = match fs::read(&path) {
             Ok(d) => d,
             Err(e) => {
-                let (c, m) = explain_io(&e, &path, false);
-                return err(&c, m);
+                let (c, k, a, m) = explain_io(&e, &path, false);
+                return io_err(&c, &k, a, &m);
             }
         };
         files.push(FileItem {
@@ -293,15 +390,15 @@ struct ReadFileResult {
 fn read_file(path: String) -> Result<ReadFileResult, ErrPayload> {
     let abs = abs_path(&path);
     if !abs.exists() {
-        return err("ENOENT", format!("文件不存在: {}", abs.display()));
+        return err_keyed("ENOENT", "file.notfound", serde_json::json!({ "path": abs.display().to_string() }), &format!("file does not exist: {}", abs.display()));
     }
     let meta = fs::metadata(&abs).map_err(|e| {
-        let (c, m) = explain_io(&e, &abs, false);
-        ErrPayload { ok: false, code: c, error: m }
+        let (c, k, a, m) = explain_io(&e, &abs, false);
+        ErrPayload::keyed_or_raw(c, k, a, m)
     })?;
     let data = fs::read(&abs).map_err(|e| {
-        let (c, m) = explain_io(&e, &abs, false);
-        ErrPayload { ok: false, code: c, error: m }
+        let (c, k, a, m) = explain_io(&e, &abs, false);
+        ErrPayload::keyed_or_raw(c, k, a, m)
     })?;
     Ok(ReadFileResult {
         ok: true,
@@ -323,8 +420,8 @@ fn save(args: SaveArgs) -> Result<SaveResult, ErrPayload> {
     let abs = abs_path(&args.path);
     if let Some(dir) = abs.parent() {
         if let Err(e) = fs::create_dir_all(dir) {
-            let (c, m) = explain_io(&e, &abs, false);
-            return err(&c, m);
+            let (c, k, a, m) = explain_io(&e, &abs, false);
+            return io_err(&c, &k, a, &m);
         }
     }
     let data = decode_b64(&args.data)?;
@@ -359,8 +456,8 @@ fn ms_of(t: std::io::Result<std::time::SystemTime>) -> u64 {
 fn stat(path: String) -> Result<StatResult, ErrPayload> {
     let abs = abs_path(&path);
     let m = fs::metadata(&abs).map_err(|e| {
-        let (c, msg) = explain_io(&e, &abs, false);
-        ErrPayload { ok: false, code: c, error: msg }
+        let (c, k, a, msg) = explain_io(&e, &abs, false);
+        ErrPayload::keyed_or_raw(c, k, a, msg)
     })?;
     Ok(StatResult {
         ok: true,
@@ -404,8 +501,8 @@ async fn save_as(window: Window, args: SaveAsArgs) -> Result<SaveAsResult, ErrPa
     };
     if let Some(dir) = path.parent() {
         if let Err(e) = fs::create_dir_all(dir) {
-            let (c, m) = explain_io(&e, &path, false);
-            return err(&c, m);
+            let (c, k, a, m) = explain_io(&e, &path, false);
+            return io_err(&c, &k, a, &m);
         }
     }
     let data = decode_b64(&args.data)?;
@@ -479,7 +576,7 @@ struct InfoPayload {
 fn pdf_info(args: DataArgs) -> Result<InfoResult, ErrPayload> {
     let bytes = decode_b64(&args.data)?;
     let (pages, title, author) =
-        pdfops::pdf_info(&bytes).map_err(|e| ErrPayload { ok: false, code: "PDF".into(), error: e })?;
+        pdfops::pdf_info(&bytes).map_err(ErrPayload::from)?;
     let version = pdfops::doc_version(&bytes).unwrap_or_default();
     Ok(InfoResult {
         ok: true,
@@ -520,7 +617,7 @@ fn jstr(v: &serde_json::Value, key: &str) -> Option<String> {
 fn pdf_op(args: OpArgs) -> Result<OpResult, ErrPayload> {
     let bytes = decode_b64(&args.data)?;
     let a = args.params.unwrap_or(serde_json::Value::Null);
-    let map = |e: String| ErrPayload { ok: false, code: "PDF".into(), error: e };
+    let map = ErrPayload::from;
 
     match args.op.as_str() {
         "delete" => {
@@ -561,15 +658,20 @@ fn pdf_op(args: OpArgs) -> Result<OpResult, ErrPayload> {
                     let p = jstr(&a, "pdfPath").unwrap_or_default();
                     let abs = abs_path(&p);
                     fs::read(&abs).map_err(|e| {
-                        let (c, m) = explain_io(&e, &abs, false);
-                        ErrPayload { ok: false, code: c, error: m }
+                        let (c, k, a, m) = explain_io(&e, &abs, false);
+                        ErrPayload::keyed_or_raw(c, k, a, m)
                     })?
                 }
             };
             let out = pdfops::insert_pdf(&bytes, &add, &at, ins.as_deref()).map_err(map)?;
             Ok(OpResult { ok: true, data: B64.encode(out), order: None, appended: None })
         }
-        other => err("OP", format!("未知操作: {}", other)),
+        other => err_keyed(
+            "OP",
+            "pdf.unknownOp",
+            serde_json::json!({ "op": other }),
+            &format!("unknown operation: {}", other),
+        ),
     }
 }
 
@@ -579,10 +681,13 @@ fn copy_text(app: tauri::AppHandle, text: String) -> Result<serde_json::Value, E
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard()
         .write_text(text)
-        .map_err(|e| ErrPayload {
-            ok: false,
-            code: "CLIP".into(),
-            error: format!("写剪贴板失败: {}", e),
+        .map_err(|e| {
+            ErrPayload::keyed(
+                "CLIP",
+                "clip.fail",
+                serde_json::json!({ "msg": e.to_string() }),
+                &format!("failed to write to the clipboard: {}", e),
+            )
         })?;
     Ok(serde_json::json!({ "ok": true }))
 }
@@ -601,10 +706,13 @@ fn show_item(path: String) -> Result<serde_json::Value, ErrPayload> {
         std::process::Command::new("explorer")
             .arg(arg)
             .spawn()
-            .map_err(|e| ErrPayload {
-                ok: false,
-                code: "SHELL".into(),
-                error: format!("无法打开资源管理器: {}", e),
+            .map_err(|e| {
+                ErrPayload::keyed(
+                    "SHELL",
+                    "shell.fail",
+                    serde_json::json!({ "msg": e.to_string() }),
+                    &format!("could not open File Explorer: {}", e),
+                )
             })?;
     }
     Ok(serde_json::json!({ "ok": true }))
@@ -637,10 +745,13 @@ fn selfcheck_dir() -> Result<String, ErrPayload> {
     if d.exists() {
         let _ = fs::remove_dir_all(&d);
     }
-    fs::create_dir_all(&d).map_err(|e| ErrPayload {
-        ok: false,
-        code: "IO".into(),
-        error: format!("无法创建自检目录: {}", e),
+    fs::create_dir_all(&d).map_err(|e| {
+        ErrPayload::keyed(
+            "IO",
+            "selfcheck.dir",
+            serde_json::json!({ "msg": e.to_string() }),
+            &format!("could not create the self-check directory: {}", e),
+        )
     })?;
     Ok(d.display().to_string())
 }
@@ -650,12 +761,15 @@ fn selfcheck_dir() -> Result<String, ErrPayload> {
 fn selfcheck_front(app: tauri::AppHandle) -> Result<String, ErrPayload> {
     let w = app
         .get_webview_window("main")
-        .ok_or_else(|| ErrPayload { ok: false, code: "SHOT".into(), error: "没有主窗口".into() })?;
+        .ok_or_else(|| ErrPayload::keyed("SHOT", "app.noWindow", serde_json::json!({}), "no main window"))?;
     let _ = w.set_focus();
-    let size = w.outer_size().map_err(|e| ErrPayload {
-        ok: false,
-        code: "SHOT".into(),
-        error: format!("取窗口尺寸失败: {}", e),
+    let size = w.outer_size().map_err(|e| {
+        ErrPayload::keyed(
+            "SHOT",
+            "shot.size",
+            serde_json::json!({ "msg": e.to_string() }),
+            &format!("failed to get the window size: {}", e),
+        )
     })?;
     Ok(format!("{}x{}", size.width, size.height))
 }
@@ -675,10 +789,13 @@ fn selfcheck_report(text: String, done: bool) -> Result<serde_json::Value, ErrPa
 
     let path = selfcheck_path();
     let tmp = path.with_extension("txt.tmp");
-    fs::write(&tmp, text.as_bytes()).map_err(|e| ErrPayload {
-        ok: false,
-        code: "IO".into(),
-        error: format!("写自检报告失败: {}", e),
+    fs::write(&tmp, text.as_bytes()).map_err(|e| {
+        ErrPayload::keyed(
+            "IO",
+            "selfcheck.write",
+            serde_json::json!({ "msg": e.to_string() }),
+            &format!("failed to write the self-check report: {}", e),
+        )
     })?;
     // 目标被占用时改名可能失败，重试几次（读方是毫秒级的一次读，很快就放开）
     let mut last = None;
@@ -694,11 +811,12 @@ fn selfcheck_report(text: String, done: bool) -> Result<serde_json::Value, ErrPa
         }
     }
     let _ = fs::remove_file(&tmp);
-    Err(ErrPayload {
-        ok: false,
-        code: "IO".into(),
-        error: format!("写自检报告失败: {}", last.unwrap()),
-    })
+    Err(ErrPayload::keyed(
+        "IO",
+        "selfcheck.write",
+        serde_json::json!({ "msg": last.unwrap().to_string() }),
+        "failed to write the self-check report",
+    ))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

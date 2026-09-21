@@ -66,6 +66,15 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.primary:hover:not(:disabled) { background: #3f7cf0; }
 button.danger { border-color: #6b3a38; color: #ffb4ae; }
 button.danger:hover:not(:disabled) { background: #4a2624; }
+/* 顶栏语言选择框：和 .mini 按钮保持同一视觉重量（高度、圆角、字号一致），
+   否则下拉框会显得比旁边的「版权」按钮高一头。 */
+select.lang {
+  background: var(--bg3); color: var(--fg); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 3px 6px; font-size: 12px;
+  height: 24px; cursor: pointer; outline: none; max-width: 120px;
+}
+select.lang:hover { background: #343a44; border-color: #4a515d; }
+select.lang:focus-visible { border-color: var(--accent); }
 button.mini { padding: 3px 8px; font-size: 12px; }
 
 main { flex: 1 1 auto; display: flex; min-height: 0; }

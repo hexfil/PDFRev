@@ -40,7 +40,7 @@ function toast(msg, isErr) {
 
 function fail(res) {
   if (!res || res.ok === false) {
-    toast((res && res.error) || '操作失败', true);
+    toast(tErr(res), true);
     return true;
   }
   return false;
@@ -55,12 +55,12 @@ function rebuildInsertAt() {
   const total = state.total;
   // 长文档只列出前 300 页避免下拉过长，其余页码用下面的“自定义…”输入
   const max = Math.min(total, 300);
-  const opts = ['<option value="head">首页（最前面）</option>', '<option value="tail">尾页（最后面）</option>'];
+  const opts = ['<option value="head">' + t('card.ins.atHead') + '</option>', '<option value="tail">' + t('card.ins.atTail') + '</option>'];
   for (let i = 1; i <= max; i++) {
-    opts.push('<option value="before:' + i + '">第 ' + i + ' 页之前</option>');
-    opts.push('<option value="after:' + i + '">第 ' + i + ' 页之后</option>');
+    opts.push('<option value="before:' + i + '">' + t('card.ins.before', { i: i }) + '</option>');
+    opts.push('<option value="after:' + i + '">' + t('card.ins.after', { i: i }) + '</option>');
   }
-  opts.push('<option value="custom">自定义…</option>');
+  opts.push('<option value="custom">' + t('card.ins.atCustom') + '</option>');
   sel.innerHTML = opts.join('');
   sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'head';
 }
@@ -83,7 +83,7 @@ function fmtTime(ms) {
 function renderFileInfo() {
   const el = $('fileInfo');
   if (!state.bytes) {
-    el.textContent = '未打开文件';
+    el.textContent = t('file.none');
     el.classList.remove('has-path');
     el.title = '';
     return;
@@ -91,7 +91,7 @@ function renderFileInfo() {
 
   const line1 = document.createElement('span');
   line1.className = 'fi-main';
-  line1.textContent = state.fileName + '  ·  ' + state.total + ' 页  ·  ' + fmtSize(state.bytes.length);
+  line1.textContent = t('file.line1', { name: state.fileName, n: state.total, size: fmtSize(state.bytes.length) });
 
   const line2 = document.createElement('span');
   line2.className = 'fi-sub';
@@ -102,16 +102,15 @@ function renderFileInfo() {
     pathEl.textContent = state.filePath;
     line2.appendChild(pathEl);
 
-    const t = state.fileTimes;
+    const times = state.fileTimes;
     const meta = document.createElement('span');
     meta.className = 'fi-meta';
-    meta.textContent = '创建 ' + fmtTime(t && t.created) +
-      '   ·   修改 ' + fmtTime(t && t.modified);
+    meta.textContent = t('file.times', { created: fmtTime(times && times.created), modified: fmtTime(times && times.modified) });
     line2.appendChild(meta);
   } else {
     const unsaved = document.createElement('span');
     unsaved.className = 'fi-path';
-    unsaved.textContent = '未保存到磁盘';
+    unsaved.textContent = t('file.unsaved');
     line2.appendChild(unsaved);
   }
 
@@ -120,12 +119,11 @@ function renderFileInfo() {
   el.appendChild(line2);
   el.classList.add('has-path');
   el.title = state.filePath
-    ? state.filePath + '\n创建 ' + fmtTime(state.fileTimes && state.fileTimes.created)
-      + '\n修改 ' + fmtTime(state.fileTimes && state.fileTimes.modified)
-    : '尚未保存到磁盘';
+    ? state.filePath + '\n' + t('file.tipCreated', { created: fmtTime(state.fileTimes && state.fileTimes.created) })
+      + '\n' + t('file.tipModified', { modified: fmtTime(state.fileTimes && state.fileTimes.modified) })
+    : t('file.tipUnsaved');
 }
 
-/** 读取磁盘时间戳（失败不打断流程，界面显示为 —） */
 async function refreshFileTimes() {
   if (!state.filePath) { state.fileTimes = null; return; }
   const res = await bridge.stat(state.filePath);
@@ -147,9 +145,9 @@ function syncToolbar() {
   $('btnRotateRight').disabled = !open || !sel;
   $('btnDeleteSel').disabled = !open || !sel;
   renderFileInfo();
-  $('btnSave').title = state.filePath ? '保存到 ' + state.filePath : '选择保存位置';
-  $('pageCount').textContent = open ? state.total + ' 页' : '';
-  $('selInfo').textContent = '已选 ' + sel + ' 页';
+  btnSave.title = state.filePath ? t('file.saveTo', { path: state.filePath }) : t('file.pickSave');
+  pageCount.textContent = open ? t('pages.count', { n: state.total }) : '';
+  selInfo.textContent = t('pages.selInfo', { n: sel });
 }
 
 function fmtSize(n) {
@@ -161,7 +159,7 @@ function fmtSize(n) {
 function setCmd(cmd, json) {
   state.lastCmd = cmd || '';
   state.lastJson = json || null;
-  $('cliOut').textContent = cmd || '（当前操作没有对应的批量命令）';
+  cliOut.textContent = cmd || t('card.cli.noCmd');
 }
 
 /* ---------------- 加载 / 渲染 ---------------- */
@@ -187,7 +185,7 @@ async function loadBytes(bytes, path, name, origin) {
   rebuildInsertAt();
   syncToolbar();
   await renderThumbs();
-  toast('已打开 ' + name + '（' + state.total + ' 页）');
+  toast(t('toast.opened', { name: name, n: state.total }));
 }
 
 async function renderThumbs() {
@@ -195,7 +193,7 @@ async function renderThumbs() {
   const pane = $('thumbs');
   pane.innerHTML = '';
   if (!state.bytes) {
-    pane.innerHTML = '<div class="empty">打开一个 PDF 开始</div>';
+    pane.innerHTML = '<div class="empty">' + t('pages.empty') + '</div>';
     return;
   }
 
@@ -211,7 +209,7 @@ async function renderThumbs() {
     chk.type = 'checkbox';
     chk.className = 'chk';
     chk.checked = state.selected.has(i);
-    chk.title = '选中第 ' + i + ' 页';
+    chk.title = t('thumb.pick', { i: i });
     chk.addEventListener('click', (e) => e.stopPropagation());
     chk.addEventListener('change', () => {
       if (chk.checked) state.selected.add(i); else state.selected.delete(i);
@@ -221,11 +219,11 @@ async function renderThumbs() {
 
     const wrap = document.createElement('div');
     wrap.className = 'canvas-wrap';
-    wrap.innerHTML = '<span class="ph">第 ' + i + ' 页</span>';
+    wrap.innerHTML = '<span class="ph">' + t('thumb.page', { i: i }) + '</span>';
 
     const meta = document.createElement('div');
     meta.className = 'meta';
-    meta.innerHTML = '<span class="idx">原第 ' + i + ' 页</span><span class="new-idx">' + i + '</span>';
+    meta.innerHTML = '<span class="idx">' + t('thumb.origPage', { i: i }) + '</span><span class="new-idx">' + i + '</span>';
 
     card.appendChild(chk);
     card.appendChild(wrap);
@@ -323,7 +321,7 @@ function bindDrag(card) {
     const pane = $('thumbs');
     if (after) card.after(dragSrc); else card.before(dragSrc);
     const order = [...pane.querySelectorAll('.thumb')].map((el) => Number(el.dataset.page));
-    await applyOrder(order, '拖动调整顺序');
+    await applyOrder(order, t('card.order.dragged'));
   });
 }
 
@@ -349,7 +347,7 @@ async function applyOrder(order, label) {
     'pdfrev reorder "' + state.fileName + '" --order ' + order.join(',') + ' -o output.pdf',
     { input: state.filePath, output: 'output.pdf', steps: [{ op: 'reorder', order: order.join(',') }] }
   );
-  toast(label || '已应用排序');
+  toast(label || t('card.order.applied'));
   await renderThumbs();
 }
 
@@ -366,7 +364,7 @@ async function doOp(op, args, cmd, json, label) {
   const info = await bridge.info(state.bytes);
   if (info.ok) state.total = info.info.pages;
   setCmd(cmd, json);
-  toast(label || '完成');
+  toast(label || t('toast.done'));
   await renderThumbs();
 }
 
@@ -384,7 +382,7 @@ $('btnOpen').addEventListener('click', async () => {
   if (fail(res)) return;
   if (res.canceled) return;
   const f = res.files[0];
-  if (res.files.length > 1) toast('一次只打开一个文件，已用第一个：' + f.name);
+  if (res.files.length > 1) toast(t('toast.oneFile', { name: f.name }));
   await loadBytes(new Uint8Array(f.data), f.path, f.name);
 });
 
@@ -397,15 +395,15 @@ $('btnOpen').addEventListener('click', async () => {
 async function saveToPath(target, unlock) {
   let res = await bridge.save(target, state.bytes, !!unlock);
   if (res && res.ok === false && res.code === 'READONLY') {
-    const yes = await askConfirm(res.error + '\n\n（清除后该文件即可被正常覆盖）');
+    const yes = await askConfirm(t('toast.readonlyAsk', { msg: tErr(res) }));
     if (!yes) return null;
     res = await bridge.save(target, state.bytes, true);
   }
   if (fail(res)) return null;
   // 保存会改写修改时间，重新读一次磁盘时间戳
   await refreshFileTimes();
-  if (res.clearedReadonly) toast('已清除只读属性并保存到 ' + res.path);
-  else toast('已保存到 ' + res.path);
+  if (res.clearedReadonly) toast(t('toast.savedUnlock', { path: res.path }));
+  else toast(t('toast.saved', { path: res.path }));
   syncToolbar();
   return res;
 }
@@ -429,7 +427,7 @@ $('btnSaveAs').addEventListener('click', async () => {
   const res = await bridge.saveAs(state.bytes, base + '-rev.pdf');
   if (fail(res)) return;
   if (res.canceled) return;
-  toast('已另存为 ' + res.path);
+  toast(t('toast.savedAs', { path: res.path }));
   bridge.showItem(res.path);
 });
 
@@ -439,7 +437,7 @@ $('btnUndo').addEventListener('click', async () => {
   state.selected.clear();
   await refreshTotal();
   await renderThumbs();
-  toast('已撤销');
+  toast(t('toast.undone'));
 });
 
 $('btnSelectAll').addEventListener('click', () => {
@@ -472,14 +470,14 @@ function applySelectionToDom() {
 $('btnDeleteSel').addEventListener('click', async () => {
   const pages = [...state.selected].sort((a, b) => a - b);
   if (!pages.length) return;
-  if (pages.length === state.total) { toast('不能删除全部页面', true); return; }
+  if (pages.length === state.total) { toast(t('toast.cantDeleteAll'), true); return; }
   const spec = pages.join(',');
   await doOp(
     'delete',
     { pages: spec },
     'pdfrev delete "' + state.fileName + '" --pages ' + spec + ' -o output.pdf',
     { input: state.filePath, output: 'output.pdf', steps: [{ op: 'delete', pages: spec }] },
-    '已删除 ' + pages.length + ' 页'
+    t('toast.deletedN', { n: pages.length })
   );
 });
 
@@ -488,7 +486,7 @@ $('btnRotateRight').addEventListener('click', () => rotate(90));
 
 async function rotate(angle) {
   const pages = [...state.selected].sort((a, b) => a - b);
-  if (!pages.length) { toast('请先选中要旋转的页', true); return; }
+  if (!pages.length) { toast(t('toast.pickRotate'), true); return; }
   const spec = pages.join(',');
   const deg = ((angle % 360) + 360) % 360;
   await doOp(
@@ -496,25 +494,25 @@ async function rotate(angle) {
     { pages: spec, angle: deg },
     'pdfrev rotate "' + state.fileName + '" --pages ' + spec + ' --angle ' + deg + ' -o output.pdf',
     { input: state.filePath, output: 'output.pdf', steps: [{ op: 'rotate', pages: spec, angle: deg }] },
-    '已旋转 ' + pages.length + ' 页'
+    t('toast.rotatedN', { n: pages.length })
   );
 }
 
 $('btnExprDelete').addEventListener('click', async () => {
   const spec = $('exprPages').value.trim();
-  if (!spec) { toast('请输入页码表达式', true); return; }
+  if (!spec) { toast(t('toast.needExpr'), true); return; }
   await doOp(
     'delete',
     { pages: spec },
     'pdfrev delete "' + state.fileName + '" --pages ' + spec + ' -o output.pdf',
     { input: state.filePath, output: 'output.pdf', steps: [{ op: 'delete', pages: spec }] },
-    '已删除 ' + spec
+    t('toast.deletedPages', { spec: spec })
   );
 });
 
 $('btnExprExtract').addEventListener('click', async () => {
   const spec = $('exprPages').value.trim();
-  if (!spec) { toast('请输入页码表达式', true); return; }
+  if (!spec) { toast(t('toast.needExpr'), true); return; }
   const res = await bridge.op('extract', state.bytes, { pages: spec });
   if (fail(res)) return;
   const save = await bridge.saveAs(new Uint8Array(res.data), (state.fileName || 'x.pdf').replace(/\.pdf$/i, '') + '-extract.pdf');
@@ -524,20 +522,20 @@ $('btnExprExtract').addEventListener('click', async () => {
     'pdfrev extract "' + state.fileName + '" --pages ' + spec + ' -o "' + save.path + '"',
     { input: state.filePath, output: save.path, steps: [{ op: 'extract', pages: spec }] }
   );
-  toast('已提取到 ' + save.path);
+  toast(t('toast.extracted', { path: save.path }));
   bridge.showItem(save.path);
 });
 
 $('btnApplyOrder').addEventListener('click', async () => {
   const v = $('orderInput').value.trim();
-  if (!v) { toast('请输入新顺序', true); return; }
-  await applyOrder(v.split(/[,，\s]+/).filter(Boolean), '已应用排序');
+  if (!v) { toast(t('toast.needOrder'), true); return; }
+  await applyOrder(v.split(/[,，\s]+/).filter(Boolean), t('card.order.applied'));
 });
 
 $('btnReverse').addEventListener('click', async () => {
   const order = [];
   for (let i = state.total; i >= 1; i--) order.push(i);
-  await applyOrder(order, '已反转页序');
+  await applyOrder(order, t('card.order.reversed'));
 });
 
 $('btnPickInsert').addEventListener('click', async () => {
@@ -547,7 +545,7 @@ $('btnPickInsert').addEventListener('click', async () => {
   const f = res.files[0];
   state.insertBytes = new Uint8Array(f.data);
   state.insertName = f.name;
-  $('insertFile').textContent = f.name + '（' + fmtSize(f.size) + '）';
+  $('insertFile').textContent = t('card.ins.picked', { name: f.name, size: fmtSize(f.size) });
   syncToolbar();
 });
 
@@ -558,9 +556,9 @@ $('insertAt').addEventListener('change', () => {
 });
 
 $('btnInsert').addEventListener('click', async () => {
-  if (!state.insertBytes) { toast('请先选择要插入的 PDF', true); return; }
+  if (!state.insertBytes) { toast(t('toast.pickInsert'), true); return; }
   const at = $('insertAt').value === 'custom' ? $('insertAtCustom').value.trim() : $('insertAt').value;
-  if (!at) { toast('请填写插入位置', true); return; }
+  if (!at) { toast(t('toast.needPosition'), true); return; }
   const pages = $('insertPages').value.trim();
   pushHistory();
   const res = await bridge.op('insert', state.bytes, {
@@ -575,34 +573,41 @@ $('btnInsert').addEventListener('click', async () => {
   const steps = [{ op: 'insert', pdf: state.insertName, at: at }];
   if (pages) steps[0].insertPages = pages;
   setCmd(cmd, { input: state.filePath, output: 'output.pdf', steps });
-  toast('已插入 ' + state.insertName);
+  toast(t('toast.inserted', { name: state.insertName }));
   await renderThumbs();
 });
 
 $('btnCopyCli').addEventListener('click', async () => {
-  if (!state.lastCmd) { toast('暂无可复制的命令', true); return; }
+  if (!state.lastCmd) { toast(t('toast.noCmd'), true); return; }
   await bridge.copyText(state.lastCmd);
-  toast('命令已复制');
+  toast(t('toast.copiedCmd'));
 });
 
 $('btnCopyCliJson').addEventListener('click', async () => {
-  if (!state.lastJson) { toast('暂无可复制的 JSON', true); return; }
+  if (!state.lastJson) { toast(t('toast.noJson'), true); return; }
   await bridge.copyText(JSON.stringify(state.lastJson, null, 2));
-  toast('JSON 已复制');
+  toast(t('toast.jsonCopied'));
 });
 
 /* ---------------- 命令行帮助面板（渲染逻辑，手写） ----------------
    注意：上面的常量块由 tools/cli-help.js 生成，别把这段的注释写成和它一样，
    否则工具会把自己的生成标记和这里认成同一处、覆盖掉这些函数（踩过）。 */
 
-/** 帮助面板是否已经渲染过（内容静态，渲染一次就够） */
-let cliHelpFilled = false;
+/**
+ * 帮助面板的渲染标记：记录上一次是用哪种语言渲染的。
+ * 不能只用一个 bool —— 切语言后内容必须重画；用语言 id 做标记，
+ * 语言没变时仍然只渲染一次。
+ */
+let cliHelpLang = null;
 
 /** 生成帮助面板内容：命令表 + 通用参数 + 语法速查 + 示例 + spec.json 样例 */
 function renderCliHelp() {
-  if (cliHelpFilled) return;
+  const lang = i18nGetLang();
+  if (cliHelpLang === lang) return;
   const body = $('chBody');
   if (!body) return;
+
+  const help = CLI_HELP_OF();
 
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
@@ -615,10 +620,10 @@ function renderCliHelp() {
     const row = el('div', 'ch-row');
     row.appendChild(el('span', 'ch-desc', label));
     const c = el('code', 'ch-cmd', code);
-    c.title = '点击复制';
+    c.title = t('ch.clickCopy');
     c.addEventListener('click', async () => {
       await bridge.copyText(code);
-      toast('已复制：' + code);
+      toast(t('toast.copied', { code: code }));
     });
     row.appendChild(c);
     return row;
@@ -627,13 +632,13 @@ function renderCliHelp() {
   body.textContent = '';
 
   /* 1. 命令 */
-  body.appendChild(el('h4', null, '命令'));
-  for (const c of CLI_COMMANDS) {
+  body.appendChild(el('h4', null, t('cli.cmd')));
+  for (const c of help.cmds) {
     const item = el('div', 'ch-item');
     const line = el('div', 'ch-line');
     const cmd = el('code', 'ch-cmd', c.u);
-    cmd.title = '点击复制';
-    cmd.addEventListener('click', async () => { await bridge.copyText(c.u); toast('已复制命令'); });
+    cmd.title = t('ch.clickCopy');
+    cmd.addEventListener('click', async () => { await bridge.copyText(c.u); toast(t('toast.cmdCopied')); });
     line.appendChild(cmd);
     item.appendChild(line);
     item.appendChild(el('div', 'ch-note', c.d));
@@ -641,36 +646,36 @@ function renderCliHelp() {
   }
 
   /* 2. 通用参数 */
-  body.appendChild(el('h4', null, '通用参数'));
+  body.appendChild(el('h4', null, t('cli.flag')));
   const flags = el('dl', 'ch-dl');
-  for (const f of CLI_FLAGS) {
+  for (const f of help.flags) {
     flags.appendChild(el('dt', null, f.f));
     flags.appendChild(el('dd', null, f.d));
   }
   body.appendChild(flags);
 
   /* 3. 语法速查 */
-  body.appendChild(el('h4', null, '写法速查'));
+  body.appendChild(el('h4', null, t('cli.syntax')));
   const syn = el('dl', 'ch-dl');
-  for (const s of CLI_SYNTAX) {
+  for (const s of help.syntax) {
     syn.appendChild(el('dt', null, s.k));
     syn.appendChild(el('dd', null, s.v));
   }
   body.appendChild(syn);
 
   /* 4. 示例（点击整行复制） */
-  body.appendChild(el('h4', null, '示例'));
-  for (const e of CLI_EXAMPLES) body.appendChild(copyRow(e.d, e.c));
+  body.appendChild(el('h4', null, t('cli.example')));
+  for (const e of help.examples) body.appendChild(copyRow(e.d, e.c));
 
   /* 5. 批量 spec.json */
-  body.appendChild(el('h4', null, '批量执行 spec.json'));
-  body.appendChild(el('div', 'ch-note', 'pdfrev run 一次读入多步操作，步骤按数组顺序执行：'));
+  body.appendChild(el('h4', null, t('cli.spec')));
+  body.appendChild(el('div', 'ch-note', t('ch.specNote')));
   const pre = el('pre', 'ch-pre', CLI_SPEC);
-  pre.title = '点击复制';
-  pre.addEventListener('click', async () => { await bridge.copyText(CLI_SPEC); toast('已复制 spec.json'); });
+  pre.title = t('ch.clickCopy');
+  pre.addEventListener('click', async () => { await bridge.copyText(CLI_SPEC); toast(t('toast.copiedSpec')); });
   body.appendChild(pre);
 
-  cliHelpFilled = true;
+  cliHelpLang = lang;
 }
 
 function openCliHelp() {
@@ -740,7 +745,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Delete') {
     e.preventDefault();
     if (state.selected.size) $('btnDeleteSel').click();
-    else toast('请先选中要删除的页，或双击某页进入预览后按 Delete', true);
+    else toast(t('toast.pickDeleteHint'), true);
   }
 });
 
@@ -799,7 +804,7 @@ async function showPreviewPage(page) {
   if (page > total) page = total;
   pv.page = page;
 
-  $('pvTitle').textContent = '第 ' + page + ' 页 / 共 ' + total + ' 页';
+  pvTitle.textContent = t('pv.pageOf', { p: page, t: total });
   $('pvPrev').disabled = page <= 1;
   $('pvNext').disabled = page >= total;
   $('pvDelete').disabled = total <= 1;
@@ -818,7 +823,7 @@ async function showPreviewPage(page) {
     pv.fitScale = Math.min(availW / base.width, availH / base.height, 3);
     await renderPreviewCanvas(docPage, token);
   } catch (err) {
-    if (token === pv.token) toast('这一页渲染失败: ' + (err && err.message ? err.message : err), true);
+    if (token === pv.token) toast(t('toast.renderPageFail', { msg: (err && err.message ? err.message : err) }), true);
   } finally {
     if (token === pv.token) $('pvLoading').classList.add('hidden');
   }
@@ -863,7 +868,7 @@ async function renderPreviewCanvas(docPage, token) {
     await docPage.render({ canvasContext: ctx, viewport: rvp }).promise;
   } catch (err) {
     if (token !== pv.token) return;
-    toast('渲染失败: ' + (err && err.message ? err.message : err), true);
+    toast(t('toast.renderFail', { msg: (err && err.message ? err.message : err) }), true);
     return;
   }
   if (token !== pv.token) return;
@@ -968,7 +973,7 @@ async function zoomActual() {
 /** 删除预览中的当前页；删完自动显示后一页（或前一页），没有页了则关闭 */
 async function deletePreviewedPage() {
   const total = state.total;
-  if (total <= 1) { toast('只剩一页，不能删除', true); return; }
+  if (total <= 1) { toast(t('toast.lastPage'), true); return; }
   const page = pv.page;
   const wasLast = page >= total;
   // 让在途的渲染作废，并记住本次删除的编号
@@ -979,7 +984,7 @@ async function deletePreviewedPage() {
     { pages: String(page) },
     'pdfrev delete "' + state.fileName + '" --pages ' + page + ' -o output.pdf',
     { input: state.filePath, output: 'output.pdf', steps: [{ op: 'delete', pages: String(page) }] },
-    '已删除第 ' + page + ' 页'
+    t('toast.deletedPage', { p: page })
   );
 
   // 删除期间用户若翻页/关闭了预览，本次后续处理作废
@@ -1128,8 +1133,8 @@ async function handleDroppedFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
   const pdf = files.find((f) => /.pdf$/i.test(f.name));
-  if (!pdf) { toast('只支持 PDF 文件', true); return; }
-  if (files.length > 1) toast('一次只打开一个文件，已用 ' + pdf.name);
+  if (!pdf) { toast(t('toast.pdfOnly'), true); return; }
+  if (files.length > 1) toast(t('toast.oneFile', { name: pdf.name }));
 
   // 取拖入文件的真实磁盘路径（Electron 32 起 File.path 已废弃，走 webUtils）
   let diskPath = '';
@@ -1153,11 +1158,11 @@ async function handleDroppedFiles(fileList) {
   try {
     bytes = new Uint8Array(await pdf.arrayBuffer());
   } catch (err) {
-    toast('读取拖入的文件失败: ' + (err && err.message ? err.message : err), true);
+    toast(t('toast.readDragFail', { msg: (err && err.message ? err.message : err) }), true);
     return;
   }
-  if (!bytes.length) { toast('拖入的文件是空的', true); return; }
-  toast('已从拖入内容打开（未落盘），按“保存”可选择存放位置');
+  if (!bytes.length) { toast(t('toast.emptyDrag'), true); return; }
+  toast(t('toast.dragOpened'));
   return await loadBytes(bytes, null, pdf.name, 'drag');
 }
 
@@ -1191,31 +1196,14 @@ syncToolbar();
    原版用的是 tools/sync-copyright.js 从多份界面同步；本版只有一处界面，
    所以改为「LICENSE 为准 + 脚本校验」，不再生成。 */
 
-const COPYRIGHT_TITLE = "MIT 开源许可";
-const COPYRIGHT_HOLDER = "版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）";
-const COPYRIGHT_LICENSE = "MIT License";
-const COPYRIGHT_CLAUSES = [
-    {
-      "n": "1",
-      "k": "授予的权利",
-      "t": "任何人可免费获得本软件及文档的副本，不受限制地使用、复制、修改、合并、发布、分发、再授权和/或销售本软件，但须遵守下列条件。"
-    },
-    {
-      "n": "2",
-      "k": "保留声明",
-      "t": "上述版权声明与本许可声明必须包含在本软件的所有副本或主要部分中。"
-    },
-    {
-      "n": "3",
-      "k": "免责声明",
-      "t": "本软件按「原样」提供，不附带任何明示或默示的担保，包括但不限于对适销性、特定用途适用性和非侵权的担保。"
-    },
-    {
-      "n": "4",
-      "k": "责任限制",
-      "t": "作者或版权持有人不对任何索赔、损害或其他责任负责，无论该责任源于合同、侵权或其他方式，亦无论是否与软件或软件的使用或其他交易有关。"
-    }
-  ];
+/**
+ * 版权页文案改为从 i18n 词典取（键 cr.title / cr.holder / cr.c1k…cr.c4t），
+ * 这样切语言时整页跟着变。条款标题与正文分开，连接符也随语言变（cr.sep）。
+ */
+function copyrightClauses() {
+  const sep = t('cr.sep');
+  return [1, 2, 3, 4].map((i) => ({ k: t('cr.c' + i + 'k'), t: t('cr.c' + i + 't'), sep: sep }));
+}
 
 /** MIT 许可全文（与项目根目录的 LICENSE 文件逐字一致） */
 const COPYRIGHT_FULL = [
@@ -1241,29 +1229,33 @@ const COPYRIGHT_FULL = [
   'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE',
   'SOFTWARE.',
 ].join('\n');
-
-/** 把版权条款填进 #copyright 的列表（标记里的文本只是占位，以这里为准） */
+/**
+ * 把版权条款填进 #copyright 的列表。
+ *
+ * 每次都重建（不再用 dataset.filled 缓存）：切语言时要整体换成另一种语言的条款。
+ * COPYRIGHT_FULL 是 MIT 原文，各语言共用同一份 —— 许可证原文不翻译，
+ * 且必须与根目录 LICENSE 逐字一致（tools/check-license.py 校验）。
+ */
 function renderCopyright() {
   const el = $('copyright');
   if (!el) return;
   const list = el.querySelector('.cr-list');
-  if (!list || list.dataset.filled === '1') return;
-  list.textContent = '';
-  for (const c of COPYRIGHT_CLAUSES) {
-    const li = document.createElement('li');
-    const b = document.createElement('b');
-    // <ol> 已经自带 1./2./3./4. 编号，这里只渲染标题，避免出现「1. 1. 个人非商业使用」
-    b.textContent = c.k + '：';
-    li.appendChild(b);
-    li.appendChild(document.createTextNode(c.t));
-    list.appendChild(li);
+  if (list) {
+    list.textContent = '';
+    for (const c of copyrightClauses()) {
+      const li = document.createElement('li');
+      const b = document.createElement('b');
+      // <ol> 已经自带 1./2./3./4. 编号，这里只渲染标题，避免出现「1. 1. 个人非商业使用」
+      b.textContent = c.k + c.sep;
+      li.appendChild(b);
+      li.appendChild(document.createTextNode(c.t));
+      list.appendChild(li);
+    }
   }
-  list.dataset.filled = '1';
 
   const full = el.querySelector('#crFull');
-  if (full && !full.textContent) full.textContent = COPYRIGHT_FULL;
+  if (full) full.textContent = COPYRIGHT_FULL;
 }
-
 /** 显示版权页（首次启动、点「版权」按钮都用它） */
 function openCopyright() {
   renderCopyright();
@@ -1331,124 +1323,313 @@ if (typeof window !== 'undefined') {
   window.__copyright = {
     open: openCopyright, close: closeCopyright, seen: copyrightSeen,
     hidden: copyrightHidden, firstRun: maybeShowCopyrightFirstRun,
-    key: COPYRIGHT_SEEN_KEY, title: COPYRIGHT_TITLE, holder: COPYRIGHT_HOLDER,
-    clauses: COPYRIGHT_CLAUSES,
+    key: COPYRIGHT_SEEN_KEY,
+    title: () => t('cr.title'), holder: () => t('cr.holder'),
+    clauses: copyrightClauses,
   };
 }
+
+
+
+/* ---------------- 语言选择 ---------------- */
+
+/**
+ * 语言下拉框。
+ *
+ * 选项用各语言自己的名字写（「简体中文」/「English」），不跟着界面语言变 ——
+ * 用户看不懂当前语言时，至少还能认出自己要选的那一行。
+ */
+(function initLangSelect() {
+  const sel = $('langSelect');
+  if (!sel) return;
+  sel.innerHTML = i18nOptionsHtml();
+  sel.value = i18nGetLang();
+  sel.addEventListener('change', () => {
+    setLang(sel.value);
+    sel.value = i18nGetLang();
+  });
+})();
+
+/**
+ * 语言切换后重画「动态生成」的部分。
+ *
+ * 静态标记（按钮、标签、占位符）已由 i18n.js 的 applyI18n() 处理；
+ * 这里的都是 JS 拼出来的：顶栏文件信息、缩略图角标、插入位置下拉、
+ * 命令行帮助面板、版权页条款，以及已打开的预览标题。
+ */
+window.addEventListener('pdfrev:langchange', () => {
+  // 缩略图角标与复选框提示：直接重画一次（不重新解码 PDF，改的是文本节点）
+  document.querySelectorAll('.thumb').forEach((card) => {
+    const i = Number(card.dataset.page);
+    const chk = card.querySelector('.chk');
+    if (chk) chk.title = t('thumb.pick', { i: i });
+    const ph = card.querySelector('.canvas-wrap .ph');
+    if (ph) ph.textContent = t('thumb.page', { i: i });
+    const idx = card.querySelector('.meta .idx');
+    if (idx) idx.textContent = t('thumb.origPage', { i: i });
+  });
+
+  rebuildInsertAt();
+  renderCopyright();
+
+  // 帮助面板：语言变了要重画（cliHelpLang 标记失配，renderCliHelp 会重建）
+  if ($('cliHelp') && !$('cliHelp').classList.contains('hidden')) renderCliHelp();
+
+  // 预览标题
+  if (pv.open && pv.doc) $('pvTitle').textContent = t('pv.pageOf', { p: pv.page, t: pv.doc.numPages });
+
+  // 顶栏文件信息 + 页数 / 已选 / 保存按钮提示
+  syncToolbar();
+
+  // 插入文件那一行（有选文件时）
+  if (state.insertName) {
+    $('insertFile').textContent = t('card.ins.picked', { name: state.insertName, size: fmtSize(state.insertBytes.length) });
+  }
+});
 
 /* ==== CLI-HELP-BLOCK: 由 tools/cli-help.js 生成，勿手改 ==== */
 
 const CLI_NAME = "pdfrev";
-const CLI_COMMANDS = [
-    {
-      "n": "info",
-      "u": "pdfrev info <文件>",
-      "d": "只读：打印页数（以及有的话，标题）。不改写文件。"
-    },
-    {
-      "n": "reorder",
-      "u": "pdfrev reorder <文件> --order 3,1,2 [-o 输出.pdf]",
-      "d": "按给定顺序重排页面。未列出的页自动按原顺序追加到末尾。"
-    },
-    {
-      "n": "delete",
-      "u": "pdfrev delete <文件> --pages 2,5,7-9 [-o 输出.pdf]",
-      "d": "删除指定页。别名 remove。"
-    },
-    {
-      "n": "extract",
-      "u": "pdfrev extract <文件> --pages 1-3 [-o 输出.pdf]",
-      "d": "只保留指定页，导出为新 PDF。"
-    },
-    {
-      "n": "rotate",
-      "u": "pdfrev rotate <文件> [--pages 2] [--angle 90] [-o 输出.pdf]",
-      "d": "旋转页面，角度为 90 的整数倍；--pages 省略时表示 all。"
-    },
-    {
-      "n": "insert",
-      "u": "pdfrev insert <文件> --pdf 插页.pdf --at head|tail|before:3|after:4 [--pages 1-2] [-o 输出.pdf]",
-      "d": "把另一个 PDF 插进来。--pages 指定插入源里的哪些页，留空表示全部。"
-    },
-    {
-      "n": "run",
-      "u": "pdfrev run <spec.json|-> [-o 输出.pdf]",
-      "d": "批量：从 JSON 读多步操作依次执行。文件名写 - 表示从标准输入读。"
-    }
-  ];
-const CLI_FLAGS = [
-    {
-      "f": "-o, --output <路径>",
-      "d": "输出文件。省略时在原文件旁写 <原名>-out.pdf。"
-    },
-    {
-      "f": "--json",
-      "d": "输出机器可读的 JSON（成功 {ok:true,...}，失败 {ok:false,error}）。"
-    },
-    {
-      "f": "--dry-run",
-      "d": "只算不写：不产生输出文件，用于预览结果。"
-    },
-    {
-      "f": "-h, --help",
-      "d": "打印用法。不带任何参数运行也等同于帮助。"
-    }
-  ];
-const CLI_SYNTAX = [
-    {
-      "k": "页码",
-      "v": "2  ·  3,5,8  ·  3-5  ·  5-end  ·  all"
-    },
-    {
-      "k": "位置",
-      "v": "head=首页  ·  tail=尾页  ·  before:3=第 3 页前  ·  after:4=第 4 页后"
-    },
-    {
-      "k": "顺序",
-      "v": "--order 3,1,2（未列出的页自动追加到末尾）"
-    },
-    {
-      "k": "退出码",
-      "v": "0 成功，1 失败（错误信息走 stderr；配 --json 时为 stdout 的 JSON）"
-    }
-  ];
-const CLI_EXAMPLES = [
-    {
-      "d": "看页数（只读，不动文件）",
-      "c": "pdfrev info in.pdf"
-    },
-    {
-      "d": "删掉第 2、5 页和第 7~9 页",
-      "c": "pdfrev delete in.pdf --pages 2,5,7-9 -o out.pdf"
-    },
-    {
-      "d": "只留下前 3 页，另存为新文件",
-      "c": "pdfrev extract in.pdf --pages 1-3 -o cover.pdf"
-    },
-    {
-      "d": "把第 3 页提到最前面",
-      "c": "pdfrev reorder in.pdf --order 3,1,2 -o out.pdf"
-    },
-    {
-      "d": "第 2 页顺时针转 90 度",
-      "c": "pdfrev rotate in.pdf --pages 2 --angle 90 -o out.pdf"
-    },
-    {
-      "d": "整个文档转正 180 度",
-      "c": "pdfrev rotate in.pdf --angle 180 -o out.pdf"
-    },
-    {
-      "d": "把插页.pdf 的第 1 页插到第 3 页之前",
-      "c": "pdfrev insert in.pdf --pdf 插页.pdf --at before:3 --pages 1 -o out.pdf"
-    },
-    {
-      "d": "只算不写，先看结果",
-      "c": "pdfrev delete in.pdf --pages 2 --dry-run --json"
-    },
-    {
-      "d": "批量：一趟做完删页 + 重排",
-      "c": "pdfrev run spec.json -o out.pdf"
-    }
-  ];
 const CLI_SPEC = "{\n  \"input\": \"in.pdf\",\n  \"output\": \"out.pdf\",\n  \"steps\": [\n    { \"op\": \"delete\",  \"pages\": \"2,5\" },\n    { \"op\": \"rotate\",  \"pages\": \"1\", \"angle\": 90 },\n    { \"op\": \"reorder\", \"order\": \"3,1,2\" }\n  ]\n}";
+
+/** 帮助内容按语言分组；渲染时按当前语言取一份（CLI_HELP_OF） */
+const CLI_HELP_BY_LANG = {
+  zh: {
+    "cmds": [
+      {
+        "n": "info",
+        "u": "pdfrev info <文件>",
+        "d": "只读：打印页数（以及有的话，标题）。不改写文件。"
+      },
+      {
+        "n": "reorder",
+        "u": "pdfrev reorder <文件> --order 3,1,2 [-o 输出.pdf]",
+        "d": "按给定顺序重排页面。未列出的页自动按原顺序追加到末尾。"
+      },
+      {
+        "n": "delete",
+        "u": "pdfrev delete <文件> --pages 2,5,7-9 [-o 输出.pdf]",
+        "d": "删除指定页。别名 remove。"
+      },
+      {
+        "n": "extract",
+        "u": "pdfrev extract <文件> --pages 1-3 [-o 输出.pdf]",
+        "d": "只保留指定页，导出为新 PDF。"
+      },
+      {
+        "n": "rotate",
+        "u": "pdfrev rotate <文件> [--pages 2] [--angle 90] [-o 输出.pdf]",
+        "d": "旋转页面，角度为 90 的整数倍；--pages 省略时表示 all。"
+      },
+      {
+        "n": "insert",
+        "u": "pdfrev insert <文件> --pdf 插页.pdf --at head|tail|before:3|after:4 [--pages 1-2] [-o 输出.pdf]",
+        "d": "把另一个 PDF 插进来。--pages 指定插入源里的哪些页，留空表示全部。"
+      },
+      {
+        "n": "run",
+        "u": "pdfrev run <spec.json|-> [-o 输出.pdf]",
+        "d": "批量：从 JSON 读多步操作依次执行。文件名写 - 表示从标准输入读。"
+      }
+    ],
+    "flags": [
+      {
+        "f": "-o, --output <路径>",
+        "d": "输出文件。省略时在原文件旁写 <原名>-out.pdf。"
+      },
+      {
+        "f": "--json",
+        "d": "输出机器可读的 JSON（成功 {ok:true,...}，失败 {ok:false,error}）。"
+      },
+      {
+        "f": "--dry-run",
+        "d": "只算不写：不产生输出文件，用于预览结果。"
+      },
+      {
+        "f": "-h, --help",
+        "d": "打印用法。不带任何参数运行也等同于帮助。"
+      }
+    ],
+    "syntax": [
+      {
+        "k": "页码",
+        "v": "2  ·  3,5,8  ·  3-5  ·  5-end  ·  all"
+      },
+      {
+        "k": "位置",
+        "v": "head=首页  ·  tail=尾页  ·  before:3=第 3 页前  ·  after:4=第 4 页后"
+      },
+      {
+        "k": "顺序",
+        "v": "--order 3,1,2（未列出的页自动追加到末尾）"
+      },
+      {
+        "k": "退出码",
+        "v": "0 成功，1 失败（错误信息走 stderr；配 --json 时为 stdout 的 JSON）"
+      }
+    ],
+    "examples": [
+      {
+        "d": "看页数（只读，不动文件）",
+        "c": "pdfrev info in.pdf"
+      },
+      {
+        "d": "删掉第 2、5 页和第 7~9 页",
+        "c": "pdfrev delete in.pdf --pages 2,5,7-9 -o out.pdf"
+      },
+      {
+        "d": "只留下前 3 页，另存为新文件",
+        "c": "pdfrev extract in.pdf --pages 1-3 -o cover.pdf"
+      },
+      {
+        "d": "把第 3 页提到最前面",
+        "c": "pdfrev reorder in.pdf --order 3,1,2 -o out.pdf"
+      },
+      {
+        "d": "第 2 页顺时针转 90 度",
+        "c": "pdfrev rotate in.pdf --pages 2 --angle 90 -o out.pdf"
+      },
+      {
+        "d": "整个文档转正 180 度",
+        "c": "pdfrev rotate in.pdf --angle 180 -o out.pdf"
+      },
+      {
+        "d": "把插页.pdf 的第 1 页插到第 3 页之前",
+        "c": "pdfrev insert in.pdf --pdf 插页.pdf --at before:3 --pages 1 -o out.pdf"
+      },
+      {
+        "d": "只算不写，先看结果",
+        "c": "pdfrev delete in.pdf --pages 2 --dry-run --json"
+      },
+      {
+        "d": "批量：一趟做完删页 + 重排",
+        "c": "pdfrev run spec.json -o out.pdf"
+      }
+    ]
+  },
+  en: {
+    "cmds": [
+      {
+        "n": "info",
+        "u": "pdfrev info <file>",
+        "d": "Read-only: print the page count (and the title, if present). Does not modify the file."
+      },
+      {
+        "n": "reorder",
+        "u": "pdfrev reorder <file> --order 3,1,2 [-o out.pdf]",
+        "d": "Reorder pages as given. Pages not listed are appended at the end in their original order."
+      },
+      {
+        "n": "delete",
+        "u": "pdfrev delete <file> --pages 2,5,7-9 [-o out.pdf]",
+        "d": "Delete the given pages. Alias: remove."
+      },
+      {
+        "n": "extract",
+        "u": "pdfrev extract <file> --pages 1-3 [-o out.pdf]",
+        "d": "Keep only the given pages and export them as a new PDF."
+      },
+      {
+        "n": "rotate",
+        "u": "pdfrev rotate <file> [--pages 2] [--angle 90] [-o out.pdf]",
+        "d": "Rotate pages; the angle must be a multiple of 90. Omitting --pages means all."
+      },
+      {
+        "n": "insert",
+        "u": "pdfrev insert <file> --pdf insert.pdf --at head|tail|before:3|after:4 [--pages 1-2] [-o out.pdf]",
+        "d": "Insert another PDF. --pages selects which pages of the source to insert; empty means all."
+      },
+      {
+        "n": "run",
+        "u": "pdfrev run <spec.json|-> [-o out.pdf]",
+        "d": "Batch: read several steps from JSON and run them in order. Use - as the file name to read stdin."
+      }
+    ],
+    "flags": [
+      {
+        "f": "-o, --output <path>",
+        "d": "Output file. If omitted, writes <name>-out.pdf next to the original."
+      },
+      {
+        "f": "--json",
+        "d": "Emit machine-readable JSON (success {ok:true,...}, failure {ok:false,error})."
+      },
+      {
+        "f": "--dry-run",
+        "d": "Compute only, write nothing: use it to preview the result."
+      },
+      {
+        "f": "-h, --help",
+        "d": "Print usage. Running with no arguments is equivalent to help."
+      }
+    ],
+    "syntax": [
+      {
+        "k": "Pages",
+        "v": "2  ·  3,5,8  ·  3-5  ·  5-end  ·  all"
+      },
+      {
+        "k": "Position",
+        "v": "head=very front  ·  tail=very end  ·  before:3=before page 3  ·  after:4=after page 4"
+      },
+      {
+        "k": "Order",
+        "v": "--order 3,1,2 (unlisted pages are appended at the end)"
+      },
+      {
+        "k": "Exit code",
+        "v": "0 success, 1 failure (errors go to stderr; with --json they go to stdout as JSON)"
+      }
+    ],
+    "examples": [
+      {
+        "d": "Show the page count (read-only, does not touch the file)",
+        "c": "pdfrev info in.pdf"
+      },
+      {
+        "d": "Delete pages 2, 5 and 7-9",
+        "c": "pdfrev delete in.pdf --pages 2,5,7-9 -o out.pdf"
+      },
+      {
+        "d": "Keep only the first 3 pages, save as a new file",
+        "c": "pdfrev extract in.pdf --pages 1-3 -o cover.pdf"
+      },
+      {
+        "d": "Move page 3 to the very front",
+        "c": "pdfrev reorder in.pdf --order 3,1,2 -o out.pdf"
+      },
+      {
+        "d": "Rotate page 2 by 90 degrees clockwise",
+        "c": "pdfrev rotate in.pdf --pages 2 --angle 90 -o out.pdf"
+      },
+      {
+        "d": "Rotate the whole document upright by 180 degrees",
+        "c": "pdfrev rotate in.pdf --angle 180 -o out.pdf"
+      },
+      {
+        "d": "Insert page 1 of insert.pdf before page 3",
+        "c": "pdfrev insert in.pdf --pdf insert.pdf --at before:3 --pages 1 -o out.pdf"
+      },
+      {
+        "d": "Compute only, preview the result first",
+        "c": "pdfrev delete in.pdf --pages 2 --dry-run --json"
+      },
+      {
+        "d": "Batch: delete + reorder in one pass",
+        "c": "pdfrev run spec.json -o out.pdf"
+      }
+    ]
+  },
+};
+
+/** 取当前语言的帮助内容；没有该语言就回落中文 */
+function CLI_HELP_OF() {
+  return CLI_HELP_BY_LANG[i18nGetLang()] || CLI_HELP_BY_LANG.zh;
+}
+
+/** 兼容旧引用（自检里会用） */
+const CLI_COMMANDS = CLI_HELP_BY_LANG.zh.cmds;
+const CLI_FLAGS = CLI_HELP_BY_LANG.zh.flags;
+const CLI_SYNTAX = CLI_HELP_BY_LANG.zh.syntax;
+const CLI_EXAMPLES = CLI_HELP_BY_LANG.zh.examples;
 

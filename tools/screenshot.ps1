@@ -14,6 +14,7 @@ param(
   [string]$Exe,
   [int]$Delay = 4,
   [string]$Out,
+  [string[]]$AppArgs = @(),
   [switch]$KeepOpen
 )
 
@@ -41,7 +42,13 @@ Start-Sleep -Milliseconds 300
 # 虚拟化过的逻辑坐标，截出来的图会只有真实内容的一角（见 WinShot.cs 注释）。
 [WinShot]::MakeDpiAware()
 
-$proc = Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -PassThru
+# 注意：不能写成 -ArgumentList $AppArgs —— 空数组会让 Start-Process 报
+# 「The argument is null, empty, ...」。所以只在真的有参数时才传。
+$proc = if ($AppArgs.Count -gt 0) {
+  Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -ArgumentList $AppArgs -PassThru
+} else {
+  Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe) -PassThru
+}
 Write-Host "==> 等待窗口出现（$Delay 秒）…" -ForegroundColor Cyan
 Start-Sleep -Seconds $Delay
 if ($proc.HasExited) { Write-Host '进程已退出，截不到窗口' -ForegroundColor Red; exit 1 }

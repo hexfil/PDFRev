@@ -240,6 +240,36 @@ PowerShell 是 DPI-unaware 的：Windows 会把窗口坐标虚拟化成逻辑像
 另外 WebView2 是 DirectComposition 渲染，普通 BitBlt 抓到的是空白，
 必须 `PrintWindow(hwnd, hdc, 2)`（`PW_RENDERFULLCONTENT`）。
 
+### 5.21 「生成块」的工具必须幂等
+
+`tools/cli-help.js` 第一次生成时在标记前留了两个换行，第二次只留一个 ——
+于是 `--check` 永远报「不同步」，而且每跑一次文件都在变。修法是把两条分支
+统一成同一个形状：
+
+```js
+const b = block();                       // 生成块本身不以空行开头
+const i = src.indexOf(MARK);
+const head = (i < 0 ? src : src.slice(0, i)).replace(/\s+$/, '');
+return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
+```
+
+### 5.22 手写段和生成段的注释头不能重名
+
+`tools/cli-help.js` 用 `/* ---------------- 命令行帮助` 当查找标记，
+而我手写的渲染函数那一段注释头**正好也是这行** —— 工具会把渲染函数
+当成自己的旧块，整段覆盖掉。
+
+修法：生成标记改成独一无二的 `/* ==== CLI-HELP-BLOCK:`，
+手写段另起一个不同措辞的注释头，并在注释里写明「别改成和生成标记一样」。
+
+### 5.23 PowerShell 的 $Args 是自动变量
+
+`screenshot.ps1` 里加了 `[string[]]$Args` 参数后报
+`ParameterBindingValidationException` —— `$Args` 是 PowerShell 的自动变量，
+不能当自己的参数名。改成 `$AppArgs`。
+
+另外 `Start-Process -ArgumentList @()` 传空数组会报
+「The argument is null, empty, ...」，所以改成按有没有参数分两支调用。
 ### 5.20 自检报告文件的两侧竞争
 
 前端每出一条结论就落一次盘，而外部 `selfcheck.ps1` 同时在轮询读它：
@@ -390,13 +420,13 @@ PowerShell 是 DPI-unaware 的：Windows 会把窗口坐标虚拟化成逻辑像
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 45 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,658,688 字节（4.44 MB） |
+| 界面自检 | 66 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,664,320 字节（4.45 MB） |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
 | 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.44 MB（1.91%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
 | 应用图标 | exe 内嵌图标已换：32x32 抽样 69.7% 红色、真透明、无棋盘残留 |
-| 版权页 | 无重复编号；logo 已加载（720x269，显示宽 320px） |
+| 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
 
 ---
 
@@ -422,19 +452,19 @@ PowerShell 是 DPI-unaware 的：Windows 会把窗口坐标虚拟化成逻辑像
 | 顶栏页数 / 体积 | 有 | 有 | |
 | 在资源管理器定位 | 有 | 有 | |
 | 复制文本到剪贴板 | 有 | 有 | |
-| 版权页 | 有 | 有 | 版权文字与原版一致 |
+| 版权页 | 许可条款页 | MIT 许可页（原版是自定义商业条款） |
 
 ---
 
 ## 13. 交付物清单
 
 - `dist\PDFRev.exe` — 单文件便携版（4.49 MB）
-- `dist\LICENSE-PDFRev.txt`
+- `dist\LICENSE`（MIT）
 - `README.md` — 使用与构建说明
 - `handoff.md` — 本文件
 - 源码：`src\`（前端）+ `src-tauri\src\`（Rust）
 - 工具：`tools\build.ps1`、`tools\selfcheck.ps1`
-- 工具：`tools\build.ps1`、`tools\selfcheck.ps1`、`tools\screenshot.ps1`、`tools\make-assets.py`
+- 工具：`tools\build.ps1`、`tools\selfcheck.ps1`、`tools\screenshot.ps1`、`tools\make-assets.py`、`tools\cli-help.js`、`tools\check-license.py`
 - 素材：`src\assets\pdfrev_logo.png`（版权页）、`src\assets\pdfrev_icon.png`（顶栏）
 - 设计原图：根目录 `pdfrev_icon.png`、`pdfrev_logo.png`（脚本的输入，不入构建产物）
 

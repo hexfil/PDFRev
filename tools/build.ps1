@@ -32,6 +32,24 @@ if (-not $Cargo) {
 if (-not (Test-Path $Cargo)) { Fail "找不到 cargo。请先安装 Rust（https://rustup.rs）。" }
 Write-Host "==> cargo: $Cargo" -ForegroundColor Cyan
 
+Write-Host '==> 生成物一致性（界面许可全文 / 命令行帮助是否与工具同源）' -ForegroundColor Cyan
+# 这两份文本都是「工具生成进 app.js」的，漂移了界面上显示的就不是真的 MIT 条款 /
+# 不是真的 CLI 参数，所以构建前先校验。
+$py = (Get-Command python -ErrorAction SilentlyContinue).Source
+if ($py) {
+  & $py (Join-Path $PSScriptRoot 'check-license.py')
+  if ($LASTEXITCODE -ne 0) { Fail '界面 MIT 全文与 LICENSE 不一致' }
+} else {
+  Write-Host '    跳过 check-license.py（找不到 python）' -ForegroundColor DarkYellow
+}
+$node = (Get-Command node -ErrorAction SilentlyContinue).Source
+if ($node) {
+  & $node (Join-Path $PSScriptRoot 'cli-help.js') --check
+  if ($LASTEXITCODE -ne 0) { Fail '命令行帮助与 tools\cli-help.js 不同步' }
+} else {
+  Write-Host '    跳过 cli-help.js --check（找不到 node）' -ForegroundColor DarkYellow
+}
+
 Write-Host '==> Rust 单元测试' -ForegroundColor Cyan
 & $Cargo test --manifest-path (Join-Path $Tauri 'Cargo.toml') --quiet
 if ($LASTEXITCODE -ne 0) { Fail 'Rust 单元测试未通过' }
@@ -53,8 +71,8 @@ if (-not $SkipSelfCheck) {
   if ($LASTEXITCODE -ne 0) { Fail '界面自检未通过，不发布' }
 }
 
-# 版权声明随包放一份（界面上也能看，但文件形式更正式）
-Copy-Item (Join-Path $Root 'LICENSE-PDFRev.txt') $Dist -Force
+# MIT 许可随包放一份（界面上也能看，但文件形式更正式）
+Copy-Item (Join-Path $Root 'LICENSE') $Dist -Force
 
 $size = (Get-Item $out).Length
 Write-Host ''

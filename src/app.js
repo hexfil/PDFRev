@@ -591,7 +591,121 @@ $('btnCopyCliJson').addEventListener('click', async () => {
   toast('JSON 已复制');
 });
 
+/* ---------------- 命令行帮助面板（渲染逻辑，手写） ----------------
+   注意：上面的常量块由 tools/cli-help.js 生成，别把这段的注释写成和它一样，
+   否则工具会把自己的生成标记和这里认成同一处、覆盖掉这些函数（踩过）。 */
+
+/** 帮助面板是否已经渲染过（内容静态，渲染一次就够） */
+let cliHelpFilled = false;
+
+/** 生成帮助面板内容：命令表 + 通用参数 + 语法速查 + 示例 + spec.json 样例 */
+function renderCliHelp() {
+  if (cliHelpFilled) return;
+  const body = $('chBody');
+  if (!body) return;
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  /** 一行「左说明、右代码」的可复制条目 */
+  const copyRow = (label, code) => {
+    const row = el('div', 'ch-row');
+    row.appendChild(el('span', 'ch-desc', label));
+    const c = el('code', 'ch-cmd', code);
+    c.title = '点击复制';
+    c.addEventListener('click', async () => {
+      await bridge.copyText(code);
+      toast('已复制：' + code);
+    });
+    row.appendChild(c);
+    return row;
+  };
+
+  body.textContent = '';
+
+  /* 1. 命令 */
+  body.appendChild(el('h4', null, '命令'));
+  for (const c of CLI_COMMANDS) {
+    const item = el('div', 'ch-item');
+    const line = el('div', 'ch-line');
+    const cmd = el('code', 'ch-cmd', c.u);
+    cmd.title = '点击复制';
+    cmd.addEventListener('click', async () => { await bridge.copyText(c.u); toast('已复制命令'); });
+    line.appendChild(cmd);
+    item.appendChild(line);
+    item.appendChild(el('div', 'ch-note', c.d));
+    body.appendChild(item);
+  }
+
+  /* 2. 通用参数 */
+  body.appendChild(el('h4', null, '通用参数'));
+  const flags = el('dl', 'ch-dl');
+  for (const f of CLI_FLAGS) {
+    flags.appendChild(el('dt', null, f.f));
+    flags.appendChild(el('dd', null, f.d));
+  }
+  body.appendChild(flags);
+
+  /* 3. 语法速查 */
+  body.appendChild(el('h4', null, '写法速查'));
+  const syn = el('dl', 'ch-dl');
+  for (const s of CLI_SYNTAX) {
+    syn.appendChild(el('dt', null, s.k));
+    syn.appendChild(el('dd', null, s.v));
+  }
+  body.appendChild(syn);
+
+  /* 4. 示例（点击整行复制） */
+  body.appendChild(el('h4', null, '示例'));
+  for (const e of CLI_EXAMPLES) body.appendChild(copyRow(e.d, e.c));
+
+  /* 5. 批量 spec.json */
+  body.appendChild(el('h4', null, '批量执行 spec.json'));
+  body.appendChild(el('div', 'ch-note', 'pdfrev run 一次读入多步操作，步骤按数组顺序执行：'));
+  const pre = el('pre', 'ch-pre', CLI_SPEC);
+  pre.title = '点击复制';
+  pre.addEventListener('click', async () => { await bridge.copyText(CLI_SPEC); toast('已复制 spec.json'); });
+  body.appendChild(pre);
+
+  cliHelpFilled = true;
+}
+
+function openCliHelp() {
+  renderCliHelp();
+  $('cliHelp').classList.remove('hidden');
+  const btn = $('chClose');
+  if (btn) btn.focus();
+}
+
+function closeCliHelp() {
+  $('cliHelp').classList.add('hidden');
+  return true;
+}
+
+function cliHelpHidden() {
+  const el = $('cliHelp');
+  return !el || el.classList.contains('hidden');
+}
+
+if ($('btnCliHelp')) $('btnCliHelp').addEventListener('click', openCliHelp);
+if ($('chClose')) $('chClose').addEventListener('click', closeCliHelp);
+if ($('cliHelp')) {
+  $('cliHelp').addEventListener('click', (e) => {
+    if (e.target === $('cliHelp')) closeCliHelp();
+  });
+}
+
 document.addEventListener('keydown', (e) => {
+  // 命令行帮助打开时只响应它（Esc 关闭）。放在最前面，
+  // 否则 Esc 会先被预览分支吃掉、帮助面板留在屏幕上。
+  if (!cliHelpHidden()) {
+    if (e.key === 'Escape') { e.preventDefault(); closeCliHelp(); }
+    return;
+  }
+
   // 确认框打开时只响应它
   if (!$('confirm').classList.contains('hidden')) {
     if (e.key === 'Enter') { e.preventDefault(); settleConfirm(true); }
@@ -1071,32 +1185,62 @@ window.__state = state;
 window.__pv = pv;
 
 syncToolbar();
-/* ---------------- 版权页（由 tools/sync-copyright.js 生成，勿手改） ---------------- */
+/* ---------------- 版权页（MIT 许可） ----------------
+   COPYRIGHT_FULL 必须与项目根目录的 LICENSE 文件逐字一致，
+   由 tools/check-license.py 校验（构建前会自动跑）。
+   原版用的是 tools/sync-copyright.js 从多份界面同步；本版只有一处界面，
+   所以改为「LICENSE 为准 + 脚本校验」，不再生成。 */
 
-const COPYRIGHT_TITLE = "版权与许可";
+const COPYRIGHT_TITLE = "MIT 开源许可";
 const COPYRIGHT_HOLDER = "版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）";
+const COPYRIGHT_LICENSE = "MIT License";
 const COPYRIGHT_CLAUSES = [
     {
       "n": "1",
-      "k": "个人非商业使用",
-      "t": "自然人个人可免费下载、复制、安装并使用本软件，无需付费。"
+      "k": "授予的权利",
+      "t": "任何人可免费获得本软件及文档的副本，不受限制地使用、复制、修改、合并、发布、分发、再授权和/或销售本软件，但须遵守下列条件。"
     },
     {
       "n": "2",
-      "k": "商业使用定义",
-      "t": "任何企业、机构、组织，无论是否盈利，将本软件用于内部业务、员工办公、批量部署、集成到产品、转售、外包服务场景，均属于商业使用。商业使用必须联系版权方获得使用许可。"
+      "k": "保留声明",
+      "t": "上述版权声明与本许可声明必须包含在本软件的所有副本或主要部分中。"
     },
     {
       "n": "3",
-      "k": "禁止行为",
-      "t": "禁止未经许可的逆向工程、反编译、反汇编、修改、二次分发。"
+      "k": "免责声明",
+      "t": "本软件按「原样」提供，不附带任何明示或默示的担保，包括但不限于对适销性、特定用途适用性和非侵权的担保。"
     },
     {
       "n": "4",
-      "k": "免责",
-      "t": "本软件不提供任何质保。"
+      "k": "责任限制",
+      "t": "作者或版权持有人不对任何索赔、损害或其他责任负责，无论该责任源于合同、侵权或其他方式，亦无论是否与软件或软件的使用或其他交易有关。"
     }
   ];
+
+/** MIT 许可全文（与项目根目录的 LICENSE 文件逐字一致） */
+const COPYRIGHT_FULL = [
+  'MIT License',
+  '',
+  'Copyright (c) 2026 He Xianfeng (何险峰) <xfhe@ipe.ac.cn>',
+  '',
+  'Permission is hereby granted, free of charge, to any person obtaining a copy',
+  'of this software and associated documentation files (the "Software"), to deal',
+  'in the Software without restriction, including without limitation the rights',
+  'to use, copy, modify, merge, publish, distribute, sublicense, and/or sell',
+  'copies of the Software, and to permit persons to whom the Software is',
+  'furnished to do so, subject to the following conditions:',
+  '',
+  'The above copyright notice and this permission notice shall be included in all',
+  'copies or substantial portions of the Software.',
+  '',
+  'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR',
+  'IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,',
+  'FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE',
+  'AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER',
+  'LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,',
+  'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE',
+  'SOFTWARE.',
+].join('\n');
 
 /** 把版权条款填进 #copyright 的列表（标记里的文本只是占位，以这里为准） */
 function renderCopyright() {
@@ -1115,6 +1259,9 @@ function renderCopyright() {
     list.appendChild(li);
   }
   list.dataset.filled = '1';
+
+  const full = el.querySelector('#crFull');
+  if (full && !full.textContent) full.textContent = COPYRIGHT_FULL;
 }
 
 /** 显示版权页（首次启动、点「版权」按钮都用它） */
@@ -1188,3 +1335,120 @@ if (typeof window !== 'undefined') {
     clauses: COPYRIGHT_CLAUSES,
   };
 }
+
+/* ==== CLI-HELP-BLOCK: 由 tools/cli-help.js 生成，勿手改 ==== */
+
+const CLI_NAME = "pdfrev";
+const CLI_COMMANDS = [
+    {
+      "n": "info",
+      "u": "pdfrev info <文件>",
+      "d": "只读：打印页数（以及有的话，标题）。不改写文件。"
+    },
+    {
+      "n": "reorder",
+      "u": "pdfrev reorder <文件> --order 3,1,2 [-o 输出.pdf]",
+      "d": "按给定顺序重排页面。未列出的页自动按原顺序追加到末尾。"
+    },
+    {
+      "n": "delete",
+      "u": "pdfrev delete <文件> --pages 2,5,7-9 [-o 输出.pdf]",
+      "d": "删除指定页。别名 remove。"
+    },
+    {
+      "n": "extract",
+      "u": "pdfrev extract <文件> --pages 1-3 [-o 输出.pdf]",
+      "d": "只保留指定页，导出为新 PDF。"
+    },
+    {
+      "n": "rotate",
+      "u": "pdfrev rotate <文件> [--pages 2] [--angle 90] [-o 输出.pdf]",
+      "d": "旋转页面，角度为 90 的整数倍；--pages 省略时表示 all。"
+    },
+    {
+      "n": "insert",
+      "u": "pdfrev insert <文件> --pdf 插页.pdf --at head|tail|before:3|after:4 [--pages 1-2] [-o 输出.pdf]",
+      "d": "把另一个 PDF 插进来。--pages 指定插入源里的哪些页，留空表示全部。"
+    },
+    {
+      "n": "run",
+      "u": "pdfrev run <spec.json|-> [-o 输出.pdf]",
+      "d": "批量：从 JSON 读多步操作依次执行。文件名写 - 表示从标准输入读。"
+    }
+  ];
+const CLI_FLAGS = [
+    {
+      "f": "-o, --output <路径>",
+      "d": "输出文件。省略时在原文件旁写 <原名>-out.pdf。"
+    },
+    {
+      "f": "--json",
+      "d": "输出机器可读的 JSON（成功 {ok:true,...}，失败 {ok:false,error}）。"
+    },
+    {
+      "f": "--dry-run",
+      "d": "只算不写：不产生输出文件，用于预览结果。"
+    },
+    {
+      "f": "-h, --help",
+      "d": "打印用法。不带任何参数运行也等同于帮助。"
+    }
+  ];
+const CLI_SYNTAX = [
+    {
+      "k": "页码",
+      "v": "2  ·  3,5,8  ·  3-5  ·  5-end  ·  all"
+    },
+    {
+      "k": "位置",
+      "v": "head=首页  ·  tail=尾页  ·  before:3=第 3 页前  ·  after:4=第 4 页后"
+    },
+    {
+      "k": "顺序",
+      "v": "--order 3,1,2（未列出的页自动追加到末尾）"
+    },
+    {
+      "k": "退出码",
+      "v": "0 成功，1 失败（错误信息走 stderr；配 --json 时为 stdout 的 JSON）"
+    }
+  ];
+const CLI_EXAMPLES = [
+    {
+      "d": "看页数（只读，不动文件）",
+      "c": "pdfrev info in.pdf"
+    },
+    {
+      "d": "删掉第 2、5 页和第 7~9 页",
+      "c": "pdfrev delete in.pdf --pages 2,5,7-9 -o out.pdf"
+    },
+    {
+      "d": "只留下前 3 页，另存为新文件",
+      "c": "pdfrev extract in.pdf --pages 1-3 -o cover.pdf"
+    },
+    {
+      "d": "把第 3 页提到最前面",
+      "c": "pdfrev reorder in.pdf --order 3,1,2 -o out.pdf"
+    },
+    {
+      "d": "第 2 页顺时针转 90 度",
+      "c": "pdfrev rotate in.pdf --pages 2 --angle 90 -o out.pdf"
+    },
+    {
+      "d": "整个文档转正 180 度",
+      "c": "pdfrev rotate in.pdf --angle 180 -o out.pdf"
+    },
+    {
+      "d": "把插页.pdf 的第 1 页插到第 3 页之前",
+      "c": "pdfrev insert in.pdf --pdf 插页.pdf --at before:3 --pages 1 -o out.pdf"
+    },
+    {
+      "d": "只算不写，先看结果",
+      "c": "pdfrev delete in.pdf --pages 2 --dry-run --json"
+    },
+    {
+      "d": "批量：一趟做完删页 + 重排",
+      "c": "pdfrev run spec.json -o out.pdf"
+    }
+  ];
+const CLI_SPEC = "{\n  \"input\": \"in.pdf\",\n  \"output\": \"out.pdf\",\n  \"steps\": [\n    { \"op\": \"delete\",  \"pages\": \"2,5\" },\n    { \"op\": \"rotate\",  \"pages\": \"1\", \"angle\": 90 },\n    { \"op\": \"reorder\", \"order\": \"3,1,2\" }\n  ]\n}";
+

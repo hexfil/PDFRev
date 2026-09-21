@@ -154,11 +154,31 @@
       put('条款无重复编号（<ol> 自带序号，文本里不再写「1.」）',
         dupNum.length === 0, JSON.stringify(dupNum));
       put('条款标题仍完整',
-        crItems.length === 4 && crItems[0].startsWith('个人非商业使用：') &&
-        crItems[1].startsWith('商业使用定义：') &&
-        crItems[2].startsWith('禁止行为：') &&
-        crItems[3].startsWith('免责：'),
-        JSON.stringify(crItems.map((s) => s.slice(0, 8))));
+        crItems.length === 4 && crItems[0].startsWith('授予的权利：') &&
+        crItems[1].startsWith('保留声明：') &&
+        crItems[2].startsWith('免责声明：') &&
+        crItems[3].startsWith('责任限制：'),
+        JSON.stringify(crItems.map((s) => s.slice(0, 6))));
+
+      /* MIT：标题、名字行、全文折叠区都要对得上 */
+      put('版权页标题为 MIT 开源许可',
+        document.querySelector('#copyright .cr-title').textContent === 'MIT 开源许可',
+        document.querySelector('#copyright .cr-title').textContent);
+      put('版权页声明以 MIT License 发布',
+        document.querySelector('#copyright .cr-license').textContent.includes('MIT License'),
+        document.querySelector('#copyright .cr-license').textContent.trim());
+      const fullPre = document.querySelector('#copyright .cr-full pre');
+      const fullText = fullPre ? fullPre.textContent : '';
+      put('折叠区含 MIT 许可全文',
+        fullText.includes('MIT License') && fullText.includes('Permission is hereby granted') &&
+        fullText.includes('WITHOUT WARRANTY OF ANY KIND') && fullText.includes('He Xianfeng'),
+        String(fullText.length) + ' 字节');
+      put('MIT 全文含五个要点段落（授予/保留/免责/责任）',
+        /Permission is hereby granted/.test(fullText) &&
+        /shall be included in all/.test(fullText) &&
+        /WITHOUT WARRANTY OF ANY KIND/.test(fullText) &&
+        /IN NO EVENT SHALL THE/.test(fullText),
+        '');
 
       /* 版权页 logo：要真的加载出来（naturalWidth > 0），不能是碎图 */
       const logo = document.querySelector('#copyright .cr-logo');
@@ -174,6 +194,20 @@
       const biOk = !!bi && bi.complete && bi.naturalWidth > 0;
       put('顶栏品牌图标已加载', biOk,
         bi ? (bi.naturalWidth + 'x' + bi.naturalHeight + ' | ' + bi.getAttribute('src')) : '无 .brand-icon');
+      /* 静态标记与 JS 常量必须一致：index.html 里的占位文本是给「JS 没跑起来」
+         时兜底用的，如果两者漂移，用户看到的会是错的内容。 */
+      put('静态标记与 JS 常量一致（标题/版权行/四条要点）',
+        (() => {
+          const t = document.querySelector('#copyright .cr-title').textContent;
+          const h = document.querySelector('#copyright .cr-holder').textContent;
+          const lis = Array.from(document.querySelectorAll('#copyright .cr-list li'))
+            .map((li) => li.textContent);
+          return t === COPYRIGHT_TITLE && h === COPYRIGHT_HOLDER &&
+            lis.length === COPYRIGHT_CLAUSES.length &&
+            lis.every((s, i) => s === COPYRIGHT_CLAUSES[i].k + '：' + COPYRIGHT_CLAUSES[i].t);
+        })(),
+        '');
+
       $('crClose').click();
       await wait(300);
       put('点「关闭」可收起版权页', $('copyright').classList.contains('hidden'));
@@ -184,6 +218,59 @@
         'showItem', 'copyText', 'getFilePath', 'promptSavePath'];
       const missing = need.filter((k) => typeof window.api[k] !== 'function');
       put('window.api 与桌面版接口一一对应（11 个方法）', missing.length === 0, missing.join(','));
+
+      /* ---------- 1.5 命令行帮助 ---------- */
+      put('「命令行等价」区有「帮助」按钮', !!$('btnCliHelp'));
+      put('帮助面板初始隐藏', $('cliHelp').classList.contains('hidden'));
+      $('btnCliHelp').click();
+      await wait(200);
+      put('点「帮助」可打开面板', !$('cliHelp').classList.contains('hidden'));
+
+      const chBody = $('chBody');
+      put('帮助面板列出了全部 7 个命令',
+        chBody.querySelectorAll('.ch-item').length === 7,
+        String(chBody.querySelectorAll('.ch-item').length));
+      const chText = chBody.textContent;
+      const wantCmds = ['pdfrev info', 'pdfrev reorder', 'pdfrev delete',
+        'pdfrev extract', 'pdfrev rotate', 'pdfrev insert', 'pdfrev run'];
+      const missCmd = wantCmds.filter((c) => !chText.includes(c));
+      put('7 个命令名称齐全', missCmd.length === 0, missCmd.join(','));
+
+      /* 通用参数：-o/--json/--dry-run/--help 都要说明 */
+      const wantFlags = ['-o, --output', '--json', '--dry-run', '-h, --help'];
+      const missFlag = wantFlags.filter((f) => !chText.includes(f));
+      put('通用参数齐全（-o/--json/--dry-run/--help）', missFlag.length === 0, missFlag.join(','));
+
+      /* 写法速查：页码与位置语法 */
+      put('写明了页码写法（2 / 3,5,8 / 3-5 / 5-end / all）',
+        chText.includes('5-end') && chText.includes('all'), '');
+      put('写明了插入位置写法（head/tail/before/after）',
+        chText.includes('head=') && chText.includes('before:3') && chText.includes('after:4'), '');
+
+      /* 示例：要有可复制的完整命令行，且带上本文件里的真实命令名 */
+      const chRows = chBody.querySelectorAll('.ch-row');
+      put('给出了 9 条示例', chRows.length === 9, String(chRows.length));
+      const exCmds = Array.from(chRows).map((r) => r.querySelector('.ch-cmd').textContent);
+      put('示例都是完整可复制的 pdfrev 命令',
+        exCmds.every((c) => c.trim().startsWith('pdfrev ')), exCmds[0] || '(空)');
+      put('示例覆盖 info/delete/extract/reorder/rotate/insert/dry-run/run',
+        ['info', 'delete', 'extract', 'reorder', 'rotate', 'insert', 'dry-run', 'run']
+          .every((k) => exCmds.some((c) => c.includes(k))), '');
+
+      /* 批量 spec.json 样例 */
+      put('给出了批量 spec.json 样例',
+        chText.includes('"steps"') && chText.includes('"op"'), '');
+
+      /* 点代码可复制（走真实剪贴板 IPC） */
+      const firstCmd = chBody.querySelector('.ch-item .ch-cmd');
+      const copyRes = await window.api.copyText(firstCmd.textContent);
+      put('帮助里的命令可点击复制', !!(copyRes && copyRes.ok !== false), JSON.stringify(copyRes));
+
+      /* Esc 关闭 */
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await wait(200);
+      put('Esc 可关闭帮助面板', $('cliHelp').classList.contains('hidden'));
+      put('帮助面板不含未填占位', !chText.includes('undefined') && !chText.includes('[object'), '');
 
       /* ---------- 3. 打开 PDF（走真实 IPC） ---------- */
       const five = await fixture('p5.pdf');
@@ -363,6 +450,14 @@
       } else {
         put('能找到真实文档 VPEg.pdf', false, vpath);
       }
+
+      /* ---------- 16.4 重新打开帮助面板，留给外部截屏 ----------
+         自检里为了验证 Esc 已经把面板关掉了；这里再打开一次，
+         这样 tools\screenshot.ps1 抓到的就是帮助面板的画面。 */
+      put('可重新打开帮助面板（供外部截屏）', (() => {
+        openCliHelp();
+        return !$('cliHelp').classList.contains('hidden');
+      })());
 
       /* ---------- 16.5 把窗口置到最前，留给外部截屏 ---------- */
       // WebView2 的像素截图要额外开特性，这里只把窗口激活；

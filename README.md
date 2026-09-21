@@ -61,7 +61,7 @@ dist\PDFRev-1.0-win64-nsis-setup.exe   NSIS 安装包（需要 tauri-cli 才能�
 ```
 
 **单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
-（已实测：把 exe 单独放进空目录，40 项自检全部通过。）
+（已实测：把 exe 单独放进空目录，64 项自检全部通过。）
 
 ## 测试
 
@@ -85,7 +85,7 @@ cargo run --example vpeg_check
 会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
 并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
 
-### 3. 界面端到端自检（40 项，真实 WebView2）
+### 3. 界面端到端自检（64 项，真实 WebView2）
 
 ```powershell
 cd F:\PDFRev_Tauri
@@ -104,10 +104,10 @@ powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
 ```
 src/                        前端（与原版共享界面逻辑）
   index.html                界面骨架（含版权页块）
-  app.js                    业务逻辑 —— 直接复用原版，一行未改
+  app.js                    业务逻辑 —— 复用原版，另含版权页与命令行帮助生成块
   style.css                 样式
   bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
-  selfcheck.js              界面端到端自检（--selfcheck 时跑）
+  selfcheck.js              界面端到端自检（--selfcheck 时跑，64 项）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）
@@ -126,9 +126,13 @@ tools/
   screenshot.ps1            给界面截图（配合 WinShot.cs）
   WinShot.cs                PrintWindow + PW_RENDERFULLCONTENT + DPI 感知
   make-assets.py            从设计原图生成图标与版权页 logo
+  cli-help.js               生成「命令行帮助」内容（与 CLI 参数同源）
+  check-license.py          校验界面 MIT 全文与 LICENSE 逐字一致
 test/
   tauri-ui.png              界面截图
   copyright.png             版权页截图
+  cli-help.png              命令行帮助面板截图
+LICENSE                     MIT 许可（界面版权页的全文来源）
 pdfrev_icon.png             设计原图（应用图标，1024x1024）
 pdfrev_logo.png             设计原图（logo，1536x1024）
 ```
@@ -206,19 +210,60 @@ BOM 标记的 UTF-16、无 BOM 但「偶数长度 + 奇数位大量 0」的 UTF-
 8. **`cargo run --example` 要求文件在 `src-tauri/examples/`**，
    不是项目根的 `examples/`；里面的 `#[path]` 也要按那个位置算相对路径。
 
+## 命令行帮助
+
+右侧「命令行等价」卡片是根据界面上做的操作，实时拼出等价的 `pdfrev` 命令行，
+方便把同样的处理写成脚本或交给别的程序调用（这就是原版 `src/cli.js` 的用途）。
+
+卡片上的「**帮助**」按钮会打开一个面板，把命令行讲清楚：
+
+- **命令**：`info` / `reorder` / `delete` / `extract` / `rotate` / `insert` / `run` 的完整用法与说明
+- **通用参数**：`-o, --output`、`--json`、`--dry-run`、`-h, --help`
+- **写法速查**：页码（`2` / `3,5,8` / `3-5` / `5-end` / `all`）与插入位置（`head` / `tail` / `before:3` / `after:4`）
+- **示例**：9 条从简到繁的可复制命令
+- **批量执行**：`spec.json` 的完整样例
+
+面板里所有命令与示例**点一下就复制到剪贴板**，Esc 或点空白处关闭。
+
+帮助内容由 `tools/cli-help.js` 生成进 `src/app.js`，与原版 CLI 的参数保持同源：
+
+```powershell
+node tools\cli-help.js           # 写入（幂等）
+node tools\cli-help.js --check   # 只校验是否与工具同步
+```
+
 ## 版权与许可
 
-与 PDFRev 桌面版/网页版**同源**，条款只在 `LICENSE-PDFRev.txt` 维护：
+本软件以 **MIT License** 发布，条款只在根目录的 `LICENSE` 文件维护：
 
 ```
-版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）
-1. 个人非商业使用：自然人个人可免费下载、复制、安装并使用本软件，无需付费。
-2. 商业使用定义：任何企业、机构、组织，无论是否盈利，将本软件用于内部业务、
-   员工办公、批量部署、集成到产品、转售、外包服务场景，均属于商业使用。
-   商业使用必须联系版权方获得使用许可。
-3. 禁止行为：禁止未经许可的逆向工程、反编译、反汇编、修改、二次分发。
-4. 本软件不提供任何质保。
+MIT License
+
+Copyright (c) 2026 He Xianfeng (何险峰) <xfhe@ipe.ac.cn>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
+
+`src-tauri/Cargo.toml` 的 `license` 字段也相应声明为 `MIT`。
+
+界面上版权页展示的就是这份许可（标题「MIT 开源许可」，四条要点 + 可展开全文），
+方便不查文件的用户直接看到条款。
 
 界面里的版权页沿用原版（`src/index.html` + `app.js` 里的生成块），
 并在顶部放了 `pdfrev_logo.png`。
@@ -228,7 +273,7 @@ BOM 标记的 UTF-16、无 BOM 但「偶数长度 + 奇数位大量 0」的 UTF-
 条款用 `<ol>` 渲染，**序号由 `<ol>` 自己生成**，代码里只写小标题：
 
 ```js
-b.textContent = c.k + '：';   // 正确：渲染成 "1. 个人非商业使用：..."
+b.textContent = c.k + '：';   // 正确：渲染成 "1. 授予的权利：..."
 // b.textContent = c.n + '. ' + c.k + '：';   // 错：会变成 "1. 1. 个人非商业使用：..."
 ```
 

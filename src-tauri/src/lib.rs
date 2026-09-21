@@ -806,7 +806,7 @@ fn selfcheck_window_title(app: tauri::AppHandle) -> Result<String, ErrPayload> {
     w.title().map_err(|e| {
         ErrPayload::keyed(
             "SHOT",
-            "app.titleFail",
+            "selfcheck.title",
             serde_json::json!({ "msg": e.to_string() }),
             &format!("could not read the window title: {}", e),
         )
@@ -857,8 +857,178 @@ fn selfcheck_report(text: String, done: bool) -> Result<serde_json::Value, ErrPa
     ))
 }
 
+/* ---------------- 版本号与命令行参数 ---------------- */
+
+/// 版本号唯一来源：`src-tauri/Cargo.toml` 的 `version`。
+///
+/// 界面（版权页）和 `--version` 都读它，不再各写一份 —— 否则发版时
+/// 很容易出现「exe 属性写 0.12.0，界面显示 0.1.0」这种不一致。
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// 项目主页（版权页要显示、也要能点开）
+pub const APP_REPO_URL: &str = "https://github.com/woxii88/PDFRev_Tauri";
+
+/// 往控制台打一行字。
+///
+/// 为什么需要这个：`main.rs` 用了 `windows_subsystem = "windows"`（双击不弹黑框），
+/// 代价是 GUI 子系统进程默认没有 stdout —— 直接 `println!` 会石沉大海。
+/// 所以这里分两种情况：
+///   1. stdout 已经有效（被重定向到文件 / 管道，或 debug 构建）→ 照常写；
+///   2. 否则附着到父进程的控制台，写给 `CONOUT$`。
+/// 不引入 windows-sys 依赖：只用到 kernel32 的两个函数，本地声明即可。
+#[cfg(windows)]
+fn console_out(text: &str) {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn AttachConsole(dw_process_id: u32) -> i32;
+        fn GetStdHandle(n_std_handle: u32) -> isize;
+        fn WriteFile(
+            h_file: isize,
+            lp_buffer: *const u8,
+            n_number_of_bytes_to_write: u32,
+            lp_number_of_bytes_written: *mut u32,
+            lp_overlapped: *mut core::ffi::c_void,
+        ) -> i32;
+    }
+    const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+    const STD_OUTPUT_HANDLE: u32 = 0xFFFF_FFF5; // (DWORD)-11
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    let mut line = String::from(text);
+    if !line.ends_with('\n') {
+        line.push('\n');
+    }
+    let bytes = line.as_bytes();
+
+    // 关键是直接用 WriteFile 写句柄，而不是走 std::io::stdout()：
+    // PowerShell 捕获输出时给的是管道句柄，Rust 那套缓冲/控制台探测在这种
+    // 组合下会写成空（实测 `$v = & PDFRev.exe --version` 拿不到东西），
+    // 裸 WriteFile 对「控制台 / 管道 / 重定向到文件」三种情况都成立。
+    let mut handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    if handle == 0 || handle == INVALID_HANDLE_VALUE {
+        // GUI 子系统进程默认没有控制台，附着到父进程的（从 cmd 里跑就是这种情况）
+        unsafe {
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+        handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    }
+    if handle == 0 || handle == INVALID_HANDLE_VALUE {
+        // 最后兜底：直接开 CONOUT$（纯双击场景其实不会走到这里，参数分支不会进）
+        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+            use std::io::Write;
+            let _ = f.write_all(bytes);
+            let _ = f.flush();
+        }
+        return;
+    }
+
+    let mut written: u32 = 0;
+    unsafe {
+        WriteFile(
+            handle,
+            bytes.as_ptr(),
+            bytes.len() as u32,
+            &mut written,
+            std::ptr::null_mut(),
+        );
+    }
+}
+#[cfg(not(windows))]
+fn console_out(text: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stdout(), "{}", text);
+}
+
+/// `--version` 的输出文本
+fn version_text() -> String {
+    format!("PDFRev {} ({})", APP_VERSION, APP_REPO_URL)
+}
+
+/// `--help` 的输出文本
+///
+/// 说明清楚：这个 exe 的正文功能都在图形界面里，命令行只提供版本/帮助 ——
+/// 真正改 PDF 的命令行是 Electron 版那条 `pdfrev` 命令（见界面里的「命令行等价」）。
+fn help_text() -> String {
+    format!(
+        "PDFRev {} - PDF page editor (Tauri 2)\n\
+         \n\
+         Usage:\n\
+         \x20 PDFRev.exe                  launch the GUI\n\
+         \x20 PDFRev.exe --version, -V    print the version and exit\n\
+         \x20 PDFRev.exe --help,    -h    print this help and exit\n\
+         \x20 PDFRev.exe --selfcheck     run the built-in UI self-check\n\
+         \n\
+         All editing happens in the GUI.  The equivalent pdfrev commands for\n\
+         whatever you do are shown in the \"Command line equivalent\" panel.\n\
+         \n\
+         Repository: {}",
+        APP_VERSION, APP_REPO_URL
+    )
+}
+
+/// 版本号（版权页显示用）
+#[tauri::command]
+fn app_version() -> String {
+    APP_VERSION.to_string()
+}
+
+/// 项目主页地址（版权页显示用）
+#[tauri::command]
+fn app_repo_url() -> String {
+    APP_REPO_URL.to_string()
+}
+
+/// 用系统默认浏览器打开链接。
+///
+/// 不用 tauri-plugin-shell / opener：这里只需要「在默认浏览器里打开一个 https 地址」，
+/// 走 `rundll32 url.dll,FileProtocolHandler` 是 Windows 上最标准的做法，
+/// 而且不用多装一个 crate（和已有的 `show_item` 用 explorer 是同一个思路）。
+///
+/// 只放行 http/https —— 这个命令被前端调用，不能让它变成任意程序启动器。
+#[tauri::command]
+fn open_url(url: String) -> Result<serde_json::Value, ErrPayload> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(ErrPayload::keyed(
+            "URL",
+            "app.badUrl",
+            serde_json::json!({ "url": url }),
+            "only http/https links can be opened",
+        ));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn()
+            .map_err(|e| {
+                ErrPayload::keyed(
+                    "URL",
+                    "app.openUrlFail",
+                    serde_json::json!({ "msg": e.to_string() }),
+                    &format!("could not open the link: {}", e),
+                )
+            })?;
+    }
+    Ok(serde_json::json!({ "ok": true }))
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 纯命令行参数（--version / --help）在起窗口之前就处理掉并退出，
+    // 否则会「弹一下窗口再退出」，脚本里很难用。
+    for a in std::env::args().skip(1) {
+        match a.as_str() {
+            "--version" | "-V" => {
+                console_out(&version_text());
+                return;
+            }
+            "--help" | "-h" => {
+                console_out(&help_text());
+                return;
+            }
+            _ => {}
+        }
+    }
+
     // --selfcheck：让前端跑自检并把结果写文件（默认启动不受影响）
     let selfcheck = std::env::args().any(|a| a == "--selfcheck");
     if selfcheck {
@@ -885,7 +1055,10 @@ pub fn run() {
             selfcheck_enabled,
             selfcheck_front,
             selfcheck_window_title,
-            set_window_title
+            set_window_title,
+            app_version,
+            app_repo_url,
+            open_url
         ])
         .setup(|app| {
             // 开发期把窗口显示出来（配置文件里 visible=false 避免白屏闪烁）

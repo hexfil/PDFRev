@@ -50,6 +50,7 @@ const CLI_HELP = {
       { f: '--json',              d: '输出机器可读的 JSON（成功 {ok:true,...}，失败 {ok:false,error}）。' },
       { f: '--dry-run',           d: '只算不写：不产生输出文件，用于预览结果。' },
       { f: '-h, --help',          d: '打印用法。不带任何参数运行也等同于帮助。' },
+      { f: '-V, --version',       d: 'PDFRev.exe 打印版本号并退出（图形界面本体不接收其它参数）。' },
     ],
     syntax: [
       { k: '页码', v: '2  ·  3,5,8  ·  3-5  ·  5-end  ·  all' },
@@ -91,6 +92,7 @@ const CLI_HELP = {
       { f: '--json',              d: 'Emit machine-readable JSON (success {ok:true,...}, failure {ok:false,error}).' },
       { f: '--dry-run',           d: 'Compute only, write nothing: use it to preview the result.' },
       { f: '-h, --help',          d: 'Print usage. Running with no arguments is equivalent to help.' },
+      { f: '-V, --version',       d: 'PDFRev.exe prints its version and exits (the GUI takes no other arguments).' },
     ],
     syntax: [
       { k: 'Pages',    v: '2  ·  3,5,8  ·  3-5  ·  5-end  ·  all' },

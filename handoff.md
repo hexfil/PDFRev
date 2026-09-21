@@ -1,9 +1,9 @@
 # PDFRev_Tauri 项目 Handoff
 
 > 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
-> 最后更新：2026-09-21（v0.12.0 已发布：国际化 + 英文标题 PDF Revisor）
+> 最后更新：2026-09-21（v0.12.0：国际化 + 英文标题 PDF Revisor + 版权页版本号/主页链接 + `--version`）
 >
-> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 89 项，全部通过。
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 96 项，全部通过。
 
 ---
 
@@ -262,6 +262,42 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 修法：生成标记改成独一无二的 `/* ==== CLI-HELP-BLOCK:`，
 手写段另起一个不同措辞的注释头，并在注释里写明「别改成和生成标记一样」。
 
+### 5.26 版本号只有一处来源；版权页链接与 `--version`
+
+**版本号**：`src-tauri/Cargo.toml` 的 `version` 是唯一来源（`env!("CARGO_PKG_VERSION")`
+在编译期烧进 exe）。三处都读它：
+  1. exe 文件属性（Tauri 从 Cargo.toml 自动写入）；
+  2. 版权页的 `#crVersion`（Rust 命令 `app_version` 取回来）；
+  3. `--version` 的输出。
+界面**不要**再手写版本号 —— 之前 `1.0.0` 和 `0.1.0` 就是两处漂移过的。
+
+**版权页的 GitHub 链接**：`<a id="crRepo">` 的点击被 JS 拦下（`preventDefault`），
+改调 `open_url` 用系统默认浏览器打开。原因有两个：webview 自己跳会把界面丢掉；
+CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断言它拒绝
+`file:///...`）—— 这个命令是前端能调的，不能变成任意程序启动器。
+
+**`--version` 在 GUI 子系统进程里怎么打印**（这个坑值得记）：
+`main.rs` 有 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`，
+好处是双击不弹黑框，代价是**进程默认没有 stdout**。
+- 从 cmd / PowerShell 跑时进程**能继承**父进程的控制台句柄，`GetStdHandle(-11)`
+  拿到的是有效句柄，直接 `WriteFile` 就行；
+- 拿不到句柄（0 或 -1）时再 `AttachConsole(ATTACH_PARENT_PROCESS)` 兜底，
+  最后才退到 `CONOUT$`。
+
+  实测过的四种调用方式（release 版）：
+  | 调用方式 | 结果 |
+  |---|---|
+  | `cmd /c "PDFRev.exe --version"` | 正常 |
+  | `cmd /c "PDFRev.exe --version > f.txt"` | 正常（写进文件） |
+  | PowerShell 管道 `\| Out-String` / `\| more` | 正常 |
+  | PowerShell `$v = & PDFRev.exe --version` 或 `> f.txt` | **拿不到** |
+
+  最后一行不是程序的问题：PowerShell 对 **GUI 子系统**进程是异步启动的，
+  不等它结束就去读管道/文件了（实测：调用后立刻检查捕获为空，3 秒后进程
+  才写出 `GetStdHandle` 的值）。要在 PS 里取输出，用
+  `Start-Process -Wait -RedirectStandardOutput` 或走 cmd。
+  **不要为了让 PowerShell 好用来改程序** —— 那样反而会把 cmd 场景弄坏。
+
 ### 5.25 多语言（i18n）：文案只有一处，Rust 不返回中文
 
 **需求**：各类菜单都支持国际化，顶栏加语言选择框。
@@ -395,20 +431,20 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 
     & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
 
-### 6.3 界面端到端自检（89 项，跑在真实 WebView2 里）
+### 6.3 界面端到端自检（96 项，跑在真实 WebView2 里）
 
 `src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
 
 **为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
 只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
 
-覆盖清单（89 项）：
+覆盖清单（96 项）：
 | 组 | 项数 | 覆盖内容 |
 |---|---|---|
-| 版权页 | 16 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、文案与 i18n 词典一致、可关闭 |
+| 版权页 | 23 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、文案与 i18n 词典一致、可关闭、显示版本号（取自 Rust）、版本号与 Rust 一致、不等于 0.1.0、含 GitHub 链接、链接文本含主机名、桥接层三个新方法、openUrl 拒绝 file:// |
 | 顶栏品牌 | 3 | 品牌图标已加载、logo + PDFRev 排在版权按钮之前、标题字号 15px / 字重 >=800 |
 | 桥接层 | 2 | window.api 注入、11 方法一一对应 |
-| 命令行帮助 | 15 | 有「帮助」按钮、初始隐藏、可打开、列出全部 7 命令、命令名齐全、4 个通用参数、页码写法、插入位置写法、9 条示例、示例完整可复制、示例覆盖面、spec.json 样例、命令可点击复制、Esc 关闭、无未填占位 |
+| 命令行帮助 | 15 | 有「帮助」按钮、初始隐藏、可打开、列出全部 7 命令、命令名齐全、5 个通用参数、页码写法、插入位置写法、9 条示例、示例完整可复制、示例覆盖面、spec.json 样例、命令可点击复制、Esc 关闭、无未填占位 |
 | IPC | 3 | read_file、返回 Uint8Array、pdf_info 页数 |
 | 缩略图 | 2 | 打开后渲染 5 个缩略图、canvas 有内容像素（PDF.js 可用） |
 | 顶栏信息 | 3 | 文件名/页数/大小、完整磁盘路径、创建与修改时间 |
@@ -504,15 +540,16 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 89 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,703,232 字节（4.49 MB），版本号 0.12.0 |
+| 界面自检 | 96 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,709,376 字节（4.49 MB），版本号 0.12.0 |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
 | 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.49 MB（1.93%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
 | 应用图标 | exe 内嵌图标已换：32x32 抽样 69.7% 红色、真透明、无棋盘残留 |
 | 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
 | 多语言 | 界面全量支持简中 / 英文，顶栏语言选择框，后端错误也按语言渲染，窗口标题同步（20 项断言） |
-| 校验值 | sha256 994CA77A12C2868FD11106E025AD3EA5DCA82BDA7279D6A12F4BBFAD947AB49F |
+| 版本号与主页 | 版权页显示 PDFRev 0.12.0 与可点击 GitHub 链接；`PDFRev.exe --version` / -V 打印版本号并返回 0 |
+| 校验值 | sha256 D2F2AA40AF0AC3DE088797480AF0F55437B914228D6DD452DAFCBBA427DEB1DA |
 
 ---
 

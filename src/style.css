@@ -273,6 +273,15 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   background: var(--bg3); border-radius: 3px; padding: 1px 5px;
   font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; color: var(--fg);
 }
+/* 版权页的版本号 + 项目主页一行 */
+.cr-meta {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px;
+  margin: 0 0 12px; padding-bottom: 12px; font-size: 12.5px; color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.cr-meta .cr-ver b { color: var(--fg); font-family: Consolas, "Cascadia Mono", monospace; }
+.cr-link { color: var(--accent); text-decoration: none; word-break: break-all; }
+.cr-link:hover { text-decoration: underline; }
 /* 许可全文折叠区：默认收起，避免版权页一屏塞不下 */
 .cr-full { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .cr-full summary { cursor: pointer; color: var(--accent); font-size: 12px; user-select: none; }

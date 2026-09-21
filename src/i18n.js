@@ -185,6 +185,7 @@ const I18N_ZH = {
   'cr.sep': '：',
   'cr.expand': '展开 MIT 许可全文',
   'cr.close': '关闭',
+  'cr.repoLabel': '项目主页：{host}',
 
   'cli.cmd': '命令',
   'cli.flag': '通用参数',
@@ -353,6 +354,7 @@ const I18N_EN = {
   'cr.sep': ': ',
   'cr.expand': 'Show the full MIT license text',
   'cr.close': 'Close',
+  'cr.repoLabel': 'Project home: {host}',
 
   'cli.cmd': 'Commands',
   'cli.flag': 'Common options',
@@ -399,6 +401,9 @@ const I18N_ERR = {
     'selfcheck.dir': '无法创建自检目录: {msg}',
     'selfcheck.write': '写自检报告失败: {msg}',
     'app.titleFail': '设置窗口标题失败: {msg}',
+    'app.badUrl': '只能打开 http/https 链接: {url}',
+    'app.openUrlFail': '无法打开链接: {msg}',
+    'selfcheck.title': '无法读取窗口标题: {msg}',
   },
   en: {
     'io.eacces': 'No write permission, cannot {act} {path}. If this is a protected system folder, use "Save As" to save to Documents or Desktop.',
@@ -437,6 +442,9 @@ const I18N_ERR = {
     'selfcheck.dir': 'Could not create the self-check directory: {msg}',
     'selfcheck.write': 'Failed to write the self-check report: {msg}',
     'app.titleFail': 'Could not set the window title: {msg}',
+    'app.badUrl': 'Only http/https links can be opened: {url}',
+    'app.openUrlFail': 'Could not open the link: {msg}',
+    'selfcheck.title': 'Could not read the window title: {msg}',
   },
 };
 

@@ -159,6 +159,12 @@
       <h2 class="cr-title" data-i18n="cr.title">MIT 开源许可</h2>
       <p class="cr-holder" data-i18n="cr.holder">版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）</p>
       <p class="cr-license" data-i18n-html="cr.licenseHtml">本软件以 <b>MIT License</b> 发布，全文见 <code>LICENSE</code>。</p>
+      <!-- 版本号 + 项目主页。版本号由 Rust 侧的 app_version 填充（Cargo.toml 是唯一来源），
+           链接点一下用默认浏览器打开（open_url 命令）。 -->
+      <p class="cr-meta">
+        <span class="cr-ver">PDFRev <b id="crVersion">—</b></span>
+        <a id="crRepo" class="cr-link" href="https://github.com/woxii88/PDFRev_Tauri" target="_blank" rel="noreferrer">github.com/woxii88/PDFRev_Tauri</a>
+      </p>
       <!-- 条款文本由 i18n 词典填充（cr.c1k/c1t … cr.c4k/c4t），这里只留空壳 -->
       <ol class="cr-list"></ol>
       <details class="cr-full">

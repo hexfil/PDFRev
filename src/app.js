@@ -1239,6 +1239,13 @@ const COPYRIGHT_FULL = [
 function renderCopyright() {
   const el = $('copyright');
   if (!el) return;
+
+  // 版本号与项目主页：版本从 Rust 侧取（Cargo.toml 是唯一来源，
+  // 界面不再手写一份，否则发版时容易和 exe 属性对不上）。
+  if (!renderCopyright.metaLoaded) {
+    renderCopyright.metaLoaded = true;
+    loadCopyrightMeta();
+  }
   const list = el.querySelector('.cr-list');
   if (list) {
     list.textContent = '';
@@ -1255,6 +1262,27 @@ function renderCopyright() {
 
   const full = el.querySelector('#crFull');
   if (full) full.textContent = COPYRIGHT_FULL;
+}
+/**
+ * 填版权页的版本号与项目主页。
+ *
+ * 只跑一次：两个值都是常量，切语言不需要重新取。
+ * 链接点击走 open_url（默认浏览器打开），而不是让 webview 自己跳 ——
+ * 跳走之后界面就没了，用户得重新打开程序。
+ */
+async function loadCopyrightMeta() {
+  try {
+    const v = await bridge.appVersion();
+    if (v && $('crVersion')) $('crVersion').textContent = v;
+  } catch (e) { /* 取不到就保持占位「—」 */ }
+  try {
+    const u = await bridge.appRepoUrl();
+    const a = $('crRepo');
+    if (u && a) {
+      a.textContent = t('cr.repoLabel', { host: u.replace(/^https?:\/\//, '') });
+      a.href = u;
+    }
+  } catch (e) { /* 同上 */ }
 }
 /** 显示版权页（首次启动、点「版权」按钮都用它） */
 function openCopyright() {
@@ -1298,6 +1326,17 @@ function maybeShowCopyrightFirstRun() {
   return true;
 }
 
+/* 版权页里的项目主页链接：交给系统浏览器打开。
+   webview 自己跳转会丢掉界面（而且 CSP 也只允许 self），所以拦下默认行为。 */
+if ($('crRepo')) {
+  $('crRepo').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const url = $('crRepo').href;
+    const res = await bridge.openUrl(url);
+    if (res && res.ok === false) toast(tErr(res), true);
+  });
+}
+
 /* 工具栏「版权」按钮 + 点遮罩关闭 + 首次启动自动展示 */
 if ($('btnCopyright')) $('btnCopyright').addEventListener('click', openCopyright);
 if ($('crClose')) $('crClose').addEventListener('click', closeCopyright);
@@ -1326,6 +1365,9 @@ if (typeof window !== 'undefined') {
     key: COPYRIGHT_SEEN_KEY,
     title: () => t('cr.title'), holder: () => t('cr.holder'),
     clauses: copyrightClauses,
+    version: () => ($('crVersion') || {}).textContent || '',
+    repo: () => ($('crRepo') || {}).href || '',
+    meta: loadCopyrightMeta,
   };
 }
 
@@ -1448,6 +1490,10 @@ const CLI_HELP_BY_LANG = {
       {
         "f": "-h, --help",
         "d": "打印用法。不带任何参数运行也等同于帮助。"
+      },
+      {
+        "f": "-V, --version",
+        "d": "PDFRev.exe 打印版本号并退出（图形界面本体不接收其它参数）。"
       }
     ],
     "syntax": [
@@ -1561,6 +1607,10 @@ const CLI_HELP_BY_LANG = {
       {
         "f": "-h, --help",
         "d": "Print usage. Running with no arguments is equivalent to help."
+      },
+      {
+        "f": "-V, --version",
+        "d": "PDFRev.exe prints its version and exits (the GUI takes no other arguments)."
       }
     ],
     "syntax": [

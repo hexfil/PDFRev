@@ -39,6 +39,8 @@
 | 版权与许可页（首次自动弹） | 前端，与原版同源 |
 | 多语言界面（简中 / 英文）+ 顶栏语言选择框 | src/i18n.js，界面全部菜单/按钮/提示随语言切换 |
 | 英文标题 | PDF Revisor（窗口标题随语言切换） |
+| 版权页版本号 + GitHub 链接 | 版本号取自 `Cargo.toml`（界面不手写），链接点一下用系统浏览器打开 |
+| `PDFRev.exe --version` / `--help` | 命令行打印版本号 / 用法并退出，版本号与界面同源 |
 
 ## 启动
 
@@ -65,7 +67,7 @@ dist\LICENSE                        MIT 许可原文，随包分发
 ```
 
 **单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
-（已实测：把 exe 单独放进空目录，89 项自检全部通过。）
+（已实测：把 exe 单独放进空目录，96 项自检全部通过。）
 
 ## 测试
 
@@ -89,7 +91,7 @@ cargo run --example vpeg_check
 会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
 并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
 
-### 3. 界面端到端自检（89 项，真实 WebView2）
+### 3. 界面端到端自检（96 项，真实 WebView2）
 
 ```powershell
 cd F:\PDFRev_Tauri
@@ -112,7 +114,7 @@ src/                        前端（与原版共享界面逻辑）
   i18n.js                   ★ 多语言词典与切换逻辑（界面文案唯一来源）
   style.css                 样式
   bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
-  selfcheck.js              界面端到端自检（--selfcheck 时跑，89 项）
+  selfcheck.js              界面端到端自检（--selfcheck 时跑，96 项）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）

@@ -225,6 +225,27 @@
         })(),
         '');
 
+      /* 版本号与项目主页：版本必须和 Rust 侧（Cargo.toml）一致 */
+      await wait(400);
+      const verText = $('crVersion').textContent.trim();
+      put('版权页显示版本号（形如 0.12.0）',
+        /^\d+\.\d+\.\d+$/.test(verText), verText);
+      let rustVer = '';
+      try { rustVer = await window.api.appVersion(); } catch (e) { rustVer = 'ERR:' + e; }
+      put('版权页版本号 == Rust 侧版本号（同一来源）',
+        verText === rustVer && /^\d+\.\d+\.\d+$/.test(rustVer), verText + ' / ' + rustVer);
+      put('版权页版本号与 exe 属性一致（>0.1.0 即已升级）',
+        verText !== '0.1.0' && verText !== '—', verText);
+      const repoA = $('crRepo');
+      put('版权页含 GitHub 链接',
+        !!repoA && /^https:\/\/github\.com\//.test(repoA.href), repoA ? repoA.href : '(无)');
+      put('GitHub 链接文本含主机名（不只是图标）',
+        !!repoA && repoA.textContent.includes('github.com'), repoA ? repoA.textContent : '(无)');
+      put('桥接层暴露 openUrl / appVersion / appRepoUrl',
+        ['openUrl', 'appVersion', 'appRepoUrl'].every((k) => typeof window.api[k] === 'function'), '');
+      put('openUrl 拒绝非 http/https（防注入）',
+        (await window.api.openUrl('file:///C:/Windows/System32/calc.exe')).ok === false, '');
+
       $('crClose').click();
       await wait(300);
       put('点「关闭」可收起版权页', $('copyright').classList.contains('hidden'));
@@ -254,9 +275,9 @@
       put('7 个命令名称齐全', missCmd.length === 0, missCmd.join(','));
 
       /* 通用参数：-o/--json/--dry-run/--help 都要说明 */
-      const wantFlags = ['-o, --output', '--json', '--dry-run', '-h, --help'];
+      const wantFlags = ['-o, --output', '--json', '--dry-run', '-h, --help', '-V, --version'];
       const missFlag = wantFlags.filter((f) => !chText.includes(f));
-      put('通用参数齐全（-o/--json/--dry-run/--help）', missFlag.length === 0, missFlag.join(','));
+      put('通用参数齐全（-o/--json/--dry-run/--help/--version）', missFlag.length === 0, missFlag.join(','));
 
       /* 写法速查：页码与位置语法 */
       put('写明了页码写法（2 / 3,5,8 / 3-5 / 5-end / all）',

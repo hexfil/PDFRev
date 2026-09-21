@@ -129,6 +129,21 @@
   /** 读回原生窗口标题（仅自检用；界面上要拿标题直接看 document.title） */
   api.windowTitle = async () => call('selfcheck_window_title');
 
+  /** 应用版本号（真正的来源是 src-tauri/Cargo.toml，这里只是取回来） */
+  api.appVersion = async () => {
+    const v = await call('app_version');
+    return typeof v === 'string' ? v : '';
+  };
+
+  /** 项目主页地址 */
+  api.appRepoUrl = async () => {
+    const v = await call('app_repo_url');
+    return typeof v === 'string' ? v : '';
+  };
+
+  /** 用系统默认浏览器打开链接（仅 http/https） */
+  api.openUrl = async (url) => call('open_url', { url: String(url || '') });
+
   api.getFilePath = () => '';
 
   window.api = api;

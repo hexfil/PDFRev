@@ -1,6 +1,6 @@
 [package]
 name = "pdfrev"
-version = "1.0.0"
+version = "0.1.0"
 description = "PDFRev - PDF 页面修改器（Tauri 2 版）"
 authors = ["何险峰 (He Xianfeng)"]
 license = "MIT"

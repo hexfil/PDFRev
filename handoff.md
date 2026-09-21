@@ -1,9 +1,9 @@
 # PDFRev_Tauri 项目 Handoff
 
 > 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
-> 最后更新：2026-09-21 12:10
+> 最后更新：2026-09-21 17:20
 >
-> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 40 项，全部通过。
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 69 项，全部通过。
 
 ---
 
@@ -16,7 +16,7 @@
 
 | | Electron 版 | Tauri 版 |
 |---|---|---|
-| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.49 MB |
+| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.45 MB |
 | 运行时 | 自带 Chromium + Node | 系统 WebView2 |
 | 相对体积 | 100% | 1.93% |
 
@@ -262,6 +262,28 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 修法：生成标记改成独一无二的 `/* ==== CLI-HELP-BLOCK:`，
 手写段另起一个不同措辞的注释头，并在注释里写明「别改成和生成标记一样」。
 
+### 5.24 顶栏品牌的位置与字号（用户指定）
+用户要求两件事，都只改顶栏，不碰其它视图：
+
+1. **「logo + PDFRev」放到「版权」前面**：`index.html` 里把那一行从
+   `<header>` 第一个子元素移到 `#btnUndo` 与 `#btnCopyright` 中间。
+   注意 `.brand-icon` 是 `display:block` 的 `<img>`，紧跟的空格不会渲染出间隙，
+   实际间距由 `.toolbar` 的 `gap: 8px` 提供，所以不用额外加 margin。
+2. **标题加黑加粗、增大一号**：界面基准字号是 `body` 的 13px，
+   所以「大一号」取 **15px**（不是 16px，那会跳到二级标题的尺度）；
+   字重写 `900`。
+   坑：微软雅黑没有 900 字重，浏览器会把 900 回落到加粗的 700，
+   肉眼看不出「更黑」。所以额外加 `-webkit-text-stroke: .35px var(--accent)`
+   做极细描边压黑——比 `text-shadow` 干净，也不会在小字号下糊成一团。
+
+配套加了 3 项自检（69 项基线就是这么来的）：
+- 用 `compareDocumentPosition` 断言 `.brand` 与 `.brand-icon` 都排在
+  `#btnCopyright` 之前（只断言 `.brand` 不够，图标也得在按钮左边）。
+- `getComputedStyle(.brand).fontSize === '15px'`。
+- `parseInt(fontWeight) >= 800`。
+
+另外顶栏品牌图标从 20px 调到 24px，跟 15px 文字视觉重量配平。
+
 ### 5.23 PowerShell 的 $Args 是自动变量
 
 `screenshot.ps1` 里加了 `[string[]]$Args` 参数后报
@@ -315,18 +337,21 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 
     & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
 
-### 6.3 界面端到端自检（40 项，跑在真实 WebView2 里）
+### 6.3 界面端到端自检（69 项，跑在真实 WebView2 里）
 
 `src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
 
 **为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
 只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
 
-覆盖清单（40 项）：
+覆盖清单（69 项）：
 | 组 | 项数 | 覆盖内容 |
 |---|---|---|
-| 版权页 | 6 | 版权页存在、工具栏按钮、首次启动弹出、四条条款齐全、版权行含版权方与邮箱、可关闭 |
-| 桥接层 | 5 | window.api 注入、11 方法一一对应、read_file、返回 Uint8Array、pdf_info 页数 |
+| 版权页 | 16 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、静态标记与 JS 常量一致、可关闭 |
+| 顶栏品牌 | 3 | 品牌图标已加载、logo + PDFRev 排在版权按钮之前、标题字号 15px / 字重 >=800 |
+| 桥接层 | 2 | window.api 注入、11 方法一一对应 |
+| 命令行帮助 | 15 | 有「帮助」按钮、初始隐藏、可打开、列出全部 7 命令、命令名齐全、4 个通用参数、页码写法、插入位置写法、9 条示例、示例完整可复制、示例覆盖面、spec.json 样例、命令可点击复制、Esc 关闭、无未填占位 |
+| IPC | 3 | read_file、返回 Uint8Array、pdf_info 页数 |
 | 缩略图 | 2 | 打开后渲染 5 个缩略图、canvas 有内容像素（PDF.js 可用） |
 | 顶栏信息 | 3 | 文件名/页数/大小、完整磁盘路径、创建与修改时间 |
 | 预览 | 5 | 双击打开、停在正确页、滚轮放大、滚轮缩小、Delete 删当前页 |
@@ -334,7 +359,7 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | 保存 | 3 | save 落盘、磁盘文件页数、stat 返回时间 |
 | 剪贴板与路径 | 2 | 写剪贴板、桥接层不返回磁盘路径（拖入走内存分支） |
 | 真实文档 | 6 | 打开 VPEg.pdf、报 62 页、中文标题 UTF-16BE 正确解码、渲染 62 缩略图、缩略图有内容、删除第 1 页 |
-| 稳定性 | 2 | 窗口置前、渲染进程无未捕获错误 |
+| 稳定性 | 3 | 可重开帮助面板、窗口置前、渲染进程无未捕获错误 |
 
     cd F:\PDFRev_Tauri
     powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
@@ -420,8 +445,8 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 66 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,664,320 字节（4.45 MB） |
+| 界面自检 | 69 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,664,832 字节（4.45 MB） |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
 | 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.44 MB（1.91%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
@@ -458,7 +483,7 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 
 ## 13. 交付物清单
 
-- `dist\PDFRev.exe` — 单文件便携版（4.49 MB）
+- `dist\PDFRev.exe` — 单文件便携版（4.45 MB）
 - `dist\LICENSE`（MIT）
 - `README.md` — 使用与构建说明
 - `handoff.md` — 本文件

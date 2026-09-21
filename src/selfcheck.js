@@ -194,6 +194,22 @@
       const biOk = !!bi && bi.complete && bi.naturalWidth > 0;
       put('顶栏品牌图标已加载', biOk,
         bi ? (bi.naturalWidth + 'x' + bi.naturalHeight + ' | ' + bi.getAttribute('src')) : '无 .brand-icon');
+      /* 品牌「logo + PDFRev」必须排在「版权」按钮前面（用户要求的位置） */
+      const brandEl = document.querySelector('.toolbar .brand');
+      const crBtn = document.querySelector('.toolbar #btnCopyright');
+      const orderOk = !!brandEl && !!crBtn &&
+        (brandEl.compareDocumentPosition(crBtn) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 &&
+        !!(bi && (bi.compareDocumentPosition(crBtn) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+      put('顶栏「logo + PDFRev」位于「版权」按钮之前', orderOk,
+        brandEl && crBtn
+          ? ('brand=' + brandEl.textContent + ' | 版权按钮文本=' + crBtn.textContent)
+          : '缺 .brand 或 #btnCopyright');
+      /* 标题字体要更大更黑：15px（基准 13px 升一号）+ 字重 900 */
+      const bcs = brandEl ? getComputedStyle(brandEl) : null;
+      put('顶栏标题字号 15px（比基准 13px 大一号）', !!bcs && bcs.fontSize === '15px',
+        bcs ? bcs.fontSize : '无 .brand');
+      put('顶栏标题字重加粗（>=800）', !!bcs && parseInt(bcs.fontWeight, 10) >= 800,
+        bcs ? bcs.fontWeight : '无 .brand');
       /* 静态标记与 JS 常量必须一致：index.html 里的占位文本是给「JS 没跑起来」
          时兜底用的，如果两者漂移，用户看到的会是错的内容。 */
       put('静态标记与 JS 常量一致（标题/版权行/四条要点）',

@@ -24,9 +24,16 @@ body {
   padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
-/* 顶栏品牌图标：用设计原图生成的小尺寸 PNG（见 tools/make-assets.py） */
-.brand-icon { width: 20px; height: 20px; display: block; }
-.brand { font-weight: 700; letter-spacing: .5px; color: var(--accent); margin-right: 6px; }
+/* 顶栏品牌图标：用设计原图生成的小尺寸 PNG（见 tools/make-assets.py）
+   位置在「撤销」与「版权」之间，紧挨版权按钮左侧。 */
+.brand-icon { width: 24px; height: 24px; display: block; margin-left: 2px; }
+/* 顶栏品牌文字：比界面基准字号（13px）大一号，字重加到 900 并用极细描边
+   压黑，避免雅黑把 900 当 700 渲染时看不出更黑。 */
+.brand {
+  font-size: 15px; font-weight: 900; letter-spacing: .5px;
+  color: var(--accent); margin-right: 6px;
+  -webkit-text-stroke: .35px var(--accent);
+}
 .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
 /* 顶栏文件信息：两行 —— 第一行文件名/页数/大小，第二行完整路径 + 创建/修改时间 */
 .fileinfo {

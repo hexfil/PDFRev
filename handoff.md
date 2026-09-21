@@ -3,7 +3,7 @@
 > 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
 > 最后更新：2026-09-21 17:20
 >
-> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 87 项，全部通过。
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 89 项，全部通过。
 
 ---
 
@@ -16,7 +16,7 @@
 
 | | Electron 版 | Tauri 版 |
 |---|---|---|
-| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.48 MB |
+| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.49 MB |
 | 运行时 | 自带 Chromium + Node | 系统 WebView2 |
 | 相对体积 | 100% | 1.93% |
 
@@ -395,14 +395,14 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 
     & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
 
-### 6.3 界面端到端自检（87 项，跑在真实 WebView2 里）
+### 6.3 界面端到端自检（89 项，跑在真实 WebView2 里）
 
 `src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
 
 **为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
 只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
 
-覆盖清单（87 项）：
+覆盖清单（89 项）：
 | 组 | 项数 | 覆盖内容 |
 |---|---|---|
 | 版权页 | 16 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、文案与 i18n 词典一致、可关闭 |
@@ -418,7 +418,7 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | 剪贴板与路径 | 2 | 写剪贴板、桥接层不返回磁盘路径（拖入走内存分支） |
 | 真实文档 | 6 | 打开 VPEg.pdf、报 62 页、中文标题 UTF-16BE 正确解码、渲染 62 缩略图、缩略图有内容、删除第 1 页 |
 | 稳定性 | 3 | 可重开帮助面板、窗口置前、渲染进程无未捕获错误 |
-| 国际化 | 18 | 语言选择框存在、2 个选项、选项用各语言自身名称、所有 data-i18n 标记都能查到词条、静态标记覆盖 >=50 处、切英文后按钮文案变英文、`<html lang>` 变 en、标签变英文、版权页变英文、页数文案变英文（pages）、选择被 localStorage 记住、后端错误按语言渲染、切回中文后复原、缩略图角标重画、切语言不改页数、英文网页标题为 PDF Revisor、桥接层暴露 setWindowTitle |
+| 国际化 | 20 | 语言选择框存在、2 个选项、选项用各语言自身名称、所有 data-i18n 标记都能查到词条、静态标记覆盖 >=50 处、切英文后按钮文案变英文、`<html lang>` 变 en、标签变英文、版权页变英文、页数文案变英文（pages）、选择被 localStorage 记住、后端错误按语言渲染、切回中文后复原、缩略图角标重画、切语言不改页数、英文网页标题为 PDF Revisor、原生窗口标题读回为 PDF Revisor、切回中文后原生标题复原 |
 
     cd F:\PDFRev_Tauri
     powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
@@ -504,10 +504,10 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 87 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,697,088 字节（4.48 MB） |
+| 界面自检 | 89 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,703,232 字节（4.49 MB） |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
-| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.48 MB（1.92%） |
+| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.49 MB（1.93%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
 | 应用图标 | exe 内嵌图标已换：32x32 抽样 69.7% 红色、真透明、无棋盘残留 |
 | 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
@@ -544,7 +544,7 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 
 ## 13. 交付物清单
 
-- `dist\PDFRev.exe` — 单文件便携版（4.48 MB）
+- `dist\PDFRev.exe` — 单文件便携版（4.49 MB）
 - `dist\LICENSE`（MIT）
 - `README.md` — 使用与构建说明
 - `handoff.md` — 本文件

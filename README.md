@@ -1,6 +1,6 @@
 # PDFRev_Tauri — PDFRev 的 Tauri 2 重写版
 
-> 当前版本：**v0.12.0**（发布物见 [Releases](https://github.com/woxii88/PDFRev_Tauri/releases)）
+> 当前版本：**v0.12.0**（发布物见 [Releases](https://github.com/woxii88/PDFRev/releases)）
 
 用 **Tauri 2（Rust + WebView2）** 重写已完成的 PDFRev 桌面版，功能一一对应。
 前端界面逻辑直接复用原版（`src/app.js` 一行未改），后端换成 Rust。

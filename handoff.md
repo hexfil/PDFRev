@@ -262,6 +262,21 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 修法：生成标记改成独一无二的 `/* ==== CLI-HELP-BLOCK:`，
 手写段另起一个不同措辞的注释头，并在注释里写明「别改成和生成标记一样」。
 
+### 5.27 仓库改名为 woxii88/PDFRev（去掉 Tauri 后缀）
+
+用户要求 GitHub 上只叫 PDFRev。做的事：
+
+1. `gh api -X PATCH repos/woxii88/PDFRev_Tauri -f name=PDFRev` —— 改名后
+   GitHub 自动把旧地址 301 重定向到新地址（旧 clone 不断，但 `git remote`
+   里还留着旧 URL）。
+2. `git remote set-url origin git@github.com:woxii88/PDFRev.git`
+3. 代码里的项目主页 URL 同步改：`src-tauri/src/lib.rs` 的 `APP_REPO_URL`、
+   `src/index.html` 的 `#crRepo`、README / release-notes 里的链接。
+   **改完必须重新 build**（前端资源是编译期嵌入的，见 5.5），
+   否则版权页链接还是旧地址。
+
+> 本机目录名仍叫 `F:\PDFRev_Tauri` —— 改目录名要重开 IDE、重配 remote，
+> 收益为零，没必要。仓库名 ≠ 程序名：exe 一直叫 `PDFRev.exe`。
 ### 5.26 版本号只有一处来源；版权页链接与 `--version`
 
 **版本号**：`src-tauri/Cargo.toml` 的 `version` 是唯一来源（`env!("CARGO_PKG_VERSION")`
@@ -549,7 +564,7 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
 | 多语言 | 界面全量支持简中 / 英文，顶栏语言选择框，后端错误也按语言渲染，窗口标题同步（20 项断言） |
 | 版本号与主页 | 版权页显示 PDFRev 0.12.0 与可点击 GitHub 链接；`PDFRev.exe --version` / -V 打印版本号并返回 0 |
-| 校验值 | sha256 D2F2AA40AF0AC3DE088797480AF0F55437B914228D6DD452DAFCBBA427DEB1DA |
+| 校验值 | sha256 9076A0704E383A4A5B47F4311116ABA07E4FE394949A71290D5AFD0733C4B04B |
 
 ---
 

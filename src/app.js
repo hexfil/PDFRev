@@ -250,7 +250,7 @@ async function renderThumbs() {
 
   // 逐个渲染缩略图，保证界面先出来
   for (let i = 1; i <= doc.numPages; i++) {
-    if (token !== renderToken) { doc.destroy(); return; }
+    if (token !== renderToken) { safeDestroy(doc); return; }
     const card = pane.querySelector('.thumb[data-page="' + i + '"]');
     if (!card) continue;
     try {
@@ -269,7 +269,22 @@ async function renderThumbs() {
       /* 单页渲染失败不影响其他页 */
     }
   }
-  doc.destroy();
+  safeDestroy(doc);
+}
+
+/**
+ * 安全释放 PDFDocumentProxy。
+ *
+ * pdf.js 的 destroy() 返回 Promise：渲染进行中被 destroy、
+ * 或对同一个 doc 重复 destroy 时都会 reject。不吞掉就变成
+ * unhandledrejection，自检里表现为偶发的未捕获错误。
+ */
+function safeDestroy(doc) {
+  if (!doc) return;
+  try {
+    const p = doc.destroy();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (e) { /* ignore */ }
 }
 
 /* ---------------- 拖拽排序 ---------------- */
@@ -649,7 +664,7 @@ function closePreview() {
   $('preview').classList.add('hidden');
   $('pvCanvas').width = 0;
   $('pvCanvas').height = 0;
-  if (pv.doc) { try { pv.doc.destroy(); } catch (e) { /* ignore */ } pv.doc = null; }
+  if (pv.doc) { safeDestroy(pv.doc); pv.doc = null; }
   // 焦点交还给主界面，Delete 恢复为“删除选中页”
   $('btnSave').focus();
 }
@@ -662,7 +677,7 @@ async function showPreviewPage(page) {
 
   if (!pv.doc) {
     const doc = await pdfjsLib.getDocument({ data: state.bytes.slice() }).promise;
-    if (token !== pv.token) { try { doc.destroy(); } catch (e) { /* ignore */ } return; }
+    if (token !== pv.token) { safeDestroy(doc); return; }
     pv.doc = doc;
   }
   const total = pv.doc.numPages;
@@ -857,7 +872,7 @@ async function deletePreviewedPage() {
   if (gen !== pv.token || !pv.open) return;
 
   // 文档已重建，预览用的 pdfjs 实例必须作废
-  if (pv.doc) { try { pv.doc.destroy(); } catch (e) { /* ignore */ } pv.doc = null; }
+  if (pv.doc) { safeDestroy(pv.doc); pv.doc = null; }
   if (state.total <= 0) { closePreview(); return; }
   await showPreviewPage(wasLast ? state.total : page);
 }
@@ -1043,7 +1058,14 @@ function base64ToBytes(b64) {
 
 window.__errs = window.__errs || [];
 window.addEventListener('error', (e) => window.__errs.push(String(e.message)));
-window.addEventListener('unhandledrejection', (e) => window.__errs.push(String(e.reason)));
+// 未捕获的 Promise 拒绝：reason 可能是对象，直接 String() 只会得到 [object Object]
+window.addEventListener('unhandledrejection', (e) => window.__errs.push(describeErr(e.reason)));
+function describeErr(r) {
+  if (r == null) return String(r);
+  if (typeof r === 'string') return r;
+  if (r instanceof Error) return r.name + ': ' + r.message;
+  try { return JSON.stringify(r); } catch (err) { return Object.prototype.toString.call(r); }
+}
 window.__currentBytes = () => state.bytes;
 window.__state = state;
 window.__pv = pv;

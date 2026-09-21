@@ -204,6 +204,19 @@ example 必须放在 `src-tauri/examples/`，`#[path]` 按该位置解析。
 Tauri 的 webview 拿不到拖入文件的真实路径（Electron 靠 webUtils）。
 桥接层 `getFilePath()` 返回空串，于是走 app.js 里已有的「内存打开、保存时再选位置」分支 —— 正好就是需求要的「拖入不另存，直接打开」。
 因此 `tauri.conf.json` 里 `dragDropEnabled: false`，让 HTML5 拖放生效。
+### 5.16 pdf.js 的 destroy() 会 reject（自检偶发 FAIL 的根因）
+
+`PDFDocumentProxy.destroy()` 返回 Promise：**渲染进行中被 destroy、
+或对同一个 doc 重复 destroy 时都会 reject**。原版没吞掉这个 Promise，
+于是偶发变成 unhandledrejection，界面自检「渲染进程无未捕获错误」这一项
+就会**时好时坏**（构建脚本因此拒绝发布）。
+
+修法：统一走 `safeDestroy(doc)`——try/catch 包一层 + `p.catch(() => {})`。
+同一批修掉的还有 4 处裸 `doc.destroy()`。
+
+同时把 `window.addEventListener('unhandledrejection', ...)` 的错误描述
+换成 `describeErr(reason)`：原来直接 `String(reason)`，reason 是对象时
+只会看到 `[object Object]`，根本查不出原因。
 ---
 
 ## 6. 测试怎么写、怎么跑

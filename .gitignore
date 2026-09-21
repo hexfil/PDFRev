@@ -1,0 +1,18 @@
+# Rust 构建产物（几百 MB，绝不入库）
+src-tauri/target/
+
+# Tauri 自动生成的 schema
+src-tauri/gen/
+
+# 发布产物
+dist/
+
+# 测试产物
+test/*-out.pdf
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

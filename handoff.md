@@ -1,0 +1,375 @@
+# PDFRev_Tauri 项目 Handoff
+
+> 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
+> 最后更新：2026-09-21 12:10
+>
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 40 项，全部通过。
+
+---
+
+## 1. 这是什么
+
+`F:\PDFRev_Tauri` —— 用 Tauri 2（Rust + 系统 WebView2）重写的 PDFRev。
+功能与 `F:\PDFRev`（Electron 版）一一对应，前端界面逻辑直接复用。
+
+存在的意义：体积。
+
+| | Electron 版 | Tauri 版 |
+|---|---|---|
+| 发布物 | 7z 61.44 MB / 解压 233 MB | 单个 exe 4.49 MB |
+| 运行时 | 自带 Chromium + Node | 系统 WebView2 |
+| 相对体积 | 100% | 1.93% |
+
+代价是依赖系统 WebView2（Win10 1803+ 通常预装，本机 153.0.4234.48）。
+
+---
+
+## 2. 环境与运行
+
+| 项 | 值 |
+|---|---|
+| 工作目录 | `F:\PDFRev_Tauri` |
+| Rust | 1.98.1（rustup 装的，在 %USERPROFILE%\.cargo\bin，未改 PATH） |
+| 构建器 | MSVC（VS 2026 Community 18.6.2，自带 Win SDK 10.0.26100） |
+| Tauri | 2.11.6 |
+| lopdf | 0.45.0（PDF 页面操作核心） |
+| Shell | Windows PowerShell 7（不是 bash） |
+
+### 环境是这次新装的
+
+本机原本没有 Rust，用 rustup 的用户级静默安装（不需要管理员）：
+下载 rustup-init.exe 后跑 `-y --default-toolchain stable --profile minimal --no-modify-path`。
+
+`--no-modify-path` 是因为 Codex 会话是非管理员，改 PATH 容易出岔子；
+代价是每次都要写全路径 `& "$env:USERPROFILE\.cargo\bin\cargo.exe"`。
+`tools\build.ps1` 已经自己找 cargo，不用管。
+
+MSVC 与 WebView2 本机已有，没重装。Rustup 下载约 300 MB。
+
+### 启动
+
+```powershell
+cd F:\PDFRev_Tauri\src-tauri
+& "$env:USERPROFILE\.cargo\bin\cargo.exe" run            # 开发
+& "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release   # 优化
+```
+
+首次构建约 3 分钟，之后增量约 20 秒。
+
+---
+
+## 3. 目录结构
+
+```
+src/                        前端（与原版共享界面逻辑）
+  index.html                界面骨架（含版权页块）
+  app.js                    业务逻辑 —— 直接复用原版，一行未改
+  style.css                 样式
+  bridge-tauri.js           把 Rust 命令包成和 Electron 版一致的 window.api
+  selfcheck.js              界面端到端自检（--selfcheck 时才跑）
+  vendor/pdf.js             PDF.js 3.11.174
+  vendor/pdf.worker.js
+  fixtures/p5.pdf, p2.pdf   自检固件（pdf-lib 生成的真 PDF）
+src-tauri/
+  src/lib.rs                全部 IPC 命令（对应原版 main.js + preload.js）
+  src/pdfops.rs             PDF 操作核心（对应原版 pdfops.js）+ 14 项单元测试
+  src/main.rs               仅 fn main() 里调 pdfrev_lib::run()
+  examples/vpeg_check.rs    真实文档端到端验收
+  tauri.conf.json           窗口 / CSP / 打包配置
+  icons/icon.ico            图标（脚本生成的几何图形）
+tools/
+  build.ps1                 构建 + 单测 + 自检 + 组装 dist
+  selfcheck.ps1             跑界面自检并把报告打印出来
+test/
+  tauri-ui.png              界面截图
+```
+
+---
+
+## 4. 架构：为什么前端能一行不改
+
+原版 src/renderer/app.js 的全部业务逻辑（状态机、缩略图、拖拽排序、
+预览缩放、快捷键、顶栏信息）只依赖 window.api 这一个接口。
+
+src/bridge-tauri.js 把 Rust 命令包装成同样的 11 个方法，形状完全一致：
+
+```js
+window.api = {
+  openPdf, readFile, save, saveAs, stat, info, op,
+  showItem, copyText, getFilePath, promptSavePath,
+};
+```
+
+于是 app.js 复制过来就能跑。两处必然差异全部在这一层吸收：
+
+1. 二进制过 IPC：Tauri 传 base64 最稳，桥接层两端做 base64 与 Uint8Array 互转；
+2. 拖入文件的磁盘路径：Tauri 的 webview 拿不到（Electron 靠 webUtils），
+   返回空串，于是走 app.js 里已有的「内存打开、保存时再选位置」分支 ——
+   这正好就是需求要的「拖入不另存，直接打开」。
+
+### IPC 命令清单
+
+| 前端调用 | Rust 命令 | 说明 |
+|---|---|---|
+| window.api.openPdf() | open_pdf | 系统文件对话框（多选） |
+| readFile(p) | read_file | 读磁盘文件（返回 base64） |
+| save(p, u8, unlock) | save | 原子写 + 只读属性处理 |
+| saveAs(u8, name) | save_as | 另存为对话框 |
+| promptSavePath(name) | pick_save_path | 只选路径不写 |
+| stat(p) | stat | 创建 / 修改时间 |
+| info(u8) | pdf_info | 页数 / 标题 / 作者 |
+| op(op, u8, args) | pdf_op | delete / reorder / extract / rotate / insert |
+| showItem(p) | show_item | 资源管理器定位 |
+| copyText(t) | copy_text | 写剪贴板 |
+| — | selfcheck_enabled | 前端问「是不是自检模式」 |
+| — | selfcheck_dir / selfcheck_report / selfcheck_front | 自检支持 |
+
+---
+
+## 5. 重点实现细节（踩过的坑，都别再踩）
+
+### 5.1 lopdf：trailer 的 Root 必须是引用，不能内联
+
+    // 错：Root 内联进 trailer，catalog() 找不到 -> 任何操作后页数变 0
+    doc.trailer.set("Root", dictionary!{ "Type" => "Catalog", "Pages" => ... });
+
+    // 对：先落成一个对象，再引用它
+    let root_id = out.add_object(dictionary!{ "Type" => "Catalog", "Pages" => pages_id });
+    out.trailer.set("Root", Object::Reference(root_id));
+
+这一条错了会导致 **14 项单测挂 7 项**，而且现象是「页数 = 0」，很容易误判到前端。
+
+### 5.2 Tauri 命令参数名必须和 Rust 形参名一致
+
+Rust 侧签名是 `fn pdf_op(args: OpArgs)`，前端就必须用 `invoke('pdf_op', { args: { op, data, args } })`。
+写成平铺 `{ op, data, args }` 会报 `invalid args 'args' ... missing field 'op'`，
+**界面上表现为所有页面操作静默失败**（没 toast、没报错）。
+
+### 5.3 Rust 的 Err() 到 JS 是 Promise reject，不是返回值
+
+原版 `app.js` 的 `fail(res)` 只认 `{ok:false, code, error}`。
+所以 `bridge-tauri.js` 里每个调用都过一层 `call()`，把 reject 归一化成 `{ok:false, code:'E_IPC', error: message}`。
+不包这层就会：无 toast + 控制台未捕获异常。
+
+### 5.4 UTF-16 中文标题
+
+`VPEg.pdf` 的标题是 **UTF-16BE 无 BOM** 的 `EMMS组月度总结（2026-09）`。
+只按 UTF-8 解会得到 `EMMS~...` 乱码。`decode_pdf_string()` 必须：
+先看 BOM（FE FF / FF FE），再看前两字节是否可解释为 UTF-16，最后回退到 PDFDocEncoding / latin1。
+
+### 5.5 前端资源是编译期嵌入的
+
+改 `src/*.js` / `*.html` / `*.css` 之后**必须重新 cargo build**，否则 exe 里还是旧资源。这条坑踩过，白排查半天。
+### 5.6 自检开关不能用 window.eval 注入
+
+前端有 `location.reload()`，注入的全局变量会丢，自检静默不跑。改成前端每次加载都 `invoke('selfcheck_enabled')` 问一次。
+
+### 5.7 localStorage 跨运行残留
+
+版权页的「已看过」标记会留在 localStorage，导致第二次自检不走版权页分支而 FAIL。
+自检开始前先清标记再 reload，并用 sessionStorage 防无限重载。
+
+### 5.8 不要手写极简 PDF 当固件
+
+xref / `/Length` 稍不对，PDF.js 就读成 0 页，会误判成前端 bug。`src/fixtures/*.pdf` 全部用 pdf-lib 生成。
+
+### 5.9 CSP
+
+- 不能有 `unsafe-eval`。所以自检里不能用 `new Function` 造滚轮事件，改 `dispatchEvent(new WheelEvent(...))`。
+- `connect-src` 必须放行 `ipc:` 和 `http://ipc.localhost`，否则 IPC 全断。
+- CSP 写在 `tauri.conf.json`，HTML 里的 `<meta CSP>` 已删。
+
+### 5.10 异步途中 state.bytes 会短暂 undefined
+
+缩略图 / 预览还在异步渲染时读 `state.bytes` 会拿到 undefined。`curBytes()` 必须判空，否则报 `bytes.slice is not a function`。
+
+### 5.11 tauri feature 要和 tauri.conf.json 对齐
+
+`protocol-asset` 与当前 conf 冲突，报错；已从 Cargo.toml 的 `tauri = { features = [] }` 里去掉。
+
+### 5.12 cargo run --example
+
+example 必须放在 `src-tauri/examples/`，`#[path]` 按该位置解析。
+
+### 5.13 路径
+
+`[System.IO.File]::ReadAllText("相对路径")` 用的是**进程 CWD**，脚本里写文件一律用绝对路径。
+
+### 5.14 写入策略
+
+超大 payload、含 shell 行继续符（反引号）的 here-string、含下载 URL 的 here-string 都会被策略拒。改用**分块 AppendAllText** 或字符串数组 join 写入。
+
+### 5.15 拖入文件的磁盘路径拿不到（这是特性，不是 bug）
+
+Tauri 的 webview 拿不到拖入文件的真实路径（Electron 靠 webUtils）。
+桥接层 `getFilePath()` 返回空串，于是走 app.js 里已有的「内存打开、保存时再选位置」分支 —— 正好就是需求要的「拖入不另存，直接打开」。
+因此 `tauri.conf.json` 里 `dragDropEnabled: false`，让 HTML5 拖放生效。
+---
+
+## 6. 测试怎么写、怎么跑
+
+三层测试，全部可重复执行。
+
+### 6.1 Rust 单元测试（14 项）
+
+在 `src-tauri/src/pdfops.rs` 末尾 `#[cfg(test)] mod tests`。覆盖：页码表达式解析、顺序表达式、
+插入位置、旋转角度校验、删除全部被拒、抽页、重排补尾、旋转累加、元数据保留、删完再读稳定。
+
+    cd F:\PDFRev_Tauri\src-tauri
+    & "$env:USERPROFILE\.cargo\bin\cargo.exe" test
+
+### 6.2 真实文档端到端（examples/vpeg_check.rs）
+
+拿用户的 `F:\PDFRev\test\VPEg.pdf`（62 页 / 10.35 MB）跑全流程：
+读 -> 删页 -> 抽页 -> 旋转 -> 插入 -> 重排 -> 写盘 -> 再读校验，并断言**源文件 sha256 未被改动**。
+
+    & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
+
+### 6.3 界面端到端自检（40 项，跑在真实 WebView2 里）
+
+`src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
+
+**为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
+只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
+
+覆盖清单（40 项）：
+| 组 | 项数 | 覆盖内容 |
+|---|---|---|
+| 版权页 | 6 | 版权页存在、工具栏按钮、首次启动弹出、四条条款齐全、版权行含版权方与邮箱、可关闭 |
+| 桥接层 | 5 | window.api 注入、11 方法一一对应、read_file、返回 Uint8Array、pdf_info 页数 |
+| 缩略图 | 2 | 打开后渲染 5 个缩略图、canvas 有内容像素（PDF.js 可用） |
+| 顶栏信息 | 3 | 文件名/页数/大小、完整磁盘路径、创建与修改时间 |
+| 预览 | 5 | 双击打开、停在正确页、滚轮放大、滚轮缩小、Delete 删当前页 |
+| 页面操作 | 6 | 删除后页序正确、关闭预览后缩略图数、排序生效、撤销排序、旋转后可解析、旋转不改页序 |
+| 保存 | 3 | save 落盘、磁盘文件页数、stat 返回时间 |
+| 剪贴板与路径 | 2 | 写剪贴板、桥接层不返回磁盘路径（拖入走内存分支） |
+| 真实文档 | 6 | 打开 VPEg.pdf、报 62 页、中文标题 UTF-16BE 正确解码、渲染 62 缩略图、缩略图有内容、删除第 1 页 |
+| 稳定性 | 2 | 窗口置前、渲染进程无未捕获错误 |
+
+    cd F:\PDFRev_Tauri
+    powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
+
+### 6.4 一键：构建 + 三层测试 + 组装 dist
+
+    powershell -ExecutionPolicy Bypass -File tools\build.ps1
+
+---
+
+## 7. 常用命令
+
+    $cargo = "$env:USERPROFILE\.cargo\bin\cargo.exe"
+
+    # 开发运行
+    cd F:\PDFRev_Tauri\src-tauri; & $cargo run
+
+    # 三层测试
+    & $cargo test
+    & $cargo run --release --example vpeg_check
+    cd F:\PDFRev_Tauri; powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
+
+    # 发布构建 + 组装
+    cd F:\PDFRev_Tauri; powershell -ExecutionPolicy Bypass -File tools\build.ps1
+
+    # VPEg.pdf 基线校验（在 F:\PDFRev 跑）
+    node -e "const{PDFDocument}=require('pdf-lib');PDFDocument.load(require('fs').readFileSync('test/VPEg.pdf'),{updateMetadata:false}).then(d=>console.log(d.getPageCount()+' 页 | '+d.getProducer()))"
+
+自检报告：`%TEMP%\pdfrev-tauri-selfcheck.txt`
+---
+
+## 8. 已知限制
+
+1. **NSIS 安装包未生成**：需要 `cargo install tauri-cli` 才能 `tauri build`。
+   当前交付的是**单文件 exe**（放空目录即为便携版，已验证）。
+2. **没有 CLI 形态**：原版也没有，所有操作走界面。
+3. **没有「新建空白 PDF」**：原版同样没有，功能以对齐为界。
+4. **插入后页面树扁平化**：插入会把页树展平，书签 / 大纲会丢。原版 Electron 版同样如此，不算回归。
+5. **copy_referenced() 只深拷一层**：嵌套资源（表单 XObject 里的引用）可能不全。VPEg.pdf 及常规文档不受影响。
+6. **图标是脚本生成的几何图形**，不是设计稿。
+7. **拖入文件拿不到磁盘路径**：见 5.15，行为符合需求。
+
+---
+
+## 9. 用户文件与事故记录
+
+**用户的文件绝不可改写。** 每轮验证都要比对 sha256。
+
+| 文件 | 大小 | sha256 前 16 | 备注 |
+|---|---|---|---|
+| `F:\PDFRev\test\VPEg.pdf` | 10849010 | `32045FD8F1ACFD7C` | 62 页，Producer `Skia/PDF m153`，中文标题 UTF-16BE 无 BOM |
+| `F:\PDFRev\test\ViPOS工作计划及进展-20260914-f.xlsx` | 46608 | `B470698E011FCB7C` | 不参与 PDF 流程，仅作核对 |
+
+事故记录：本次开发**没有发生过**用户文件被改写。所有操作都是「读源文件 -> 内存操作 -> 写新文件」。
+`vpeg_check` 每轮都会断言源文件 sha256 未变。
+
+---
+
+## 10. 下次继续时的起手式
+
+    # 1. 确认环境还在
+    & "$env:USERPROFILE\.cargo\bin\cargo.exe" --version
+
+    # 2. 先跑测试，确认基线是绿的
+    cd F:\PDFRev_Tauri\src-tauri; & "$env:USERPROFILE\.cargo\bin\cargo.exe" test
+    cd F:\PDFRev_Tauri; powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
+
+    # 3. 再改代码。改完 src/*.js 记得重新 cargo build（见 5.5）
+
+改动前先想清楚落点：
+
+- **PDF 页面语义** -> `src-tauri/src/pdfops.rs`（并补单测）
+- **新增一个界面能力** -> `src-tauri/src/lib.rs` 加命令 + `src/bridge-tauri.js` 加同名方法 + `src/app.js` 调用
+- **纯界面** -> 只动 `src/*`，但必须重新 build
+---
+
+## 11. 本次交付的验证结果
+
+全部通过（2026-09-21）：
+
+| 项 | 结果 |
+|---|---|
+| Rust 单元测试 | 14 项通过，0 失败 |
+| 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
+| 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
+| 界面自检 | 40 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4.49 MB |
+| 便携性 | 单独放空目录仍 40 项全绿，无需额外 dll |
+| 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.49 MB（1.93%） |
+| 界面截图 | test\tauri-ui.png（1374x937，704 色，61% 深色，非白屏） |
+---
+
+## 12. 与 Electron 原版的功能对照
+
+| 功能 | 原版 | Tauri 版 | 备注 |
+|---|---|---|---|
+| 打开 PDF（对话框 / 多选） | 有 | 有 | |
+| 拖拽文件到中心区域打开 | 有 | 有 | 不另存，直接读内存（见 5.15） |
+| 缩略图列表 + 点击翻页 | 有 | 有 | |
+| 拖拽排序页面 | 有 | 有 | |
+| 删除页 / 按范围删 | 有 | 有 | |
+| 抽取指定页为新文件 | 有 | 有 | |
+| 旋转页面 | 有 | 有 | |
+| 插入其它 PDF | 有 | 有 | |
+| 双击页面预览 | 有 | 有 | |
+| 预览滚轮缩放 | 有 | 有 | |
+| 预览中 Delete 删页 | 有 | 有 | |
+| 保存 / 另存为 | 有 | 有 | 原子写 |
+| 只读文件处理 | 有 | 有 | |
+| 顶栏文件名 + 完整路径 | 有 | 有 | |
+| 顶栏创建 / 修改时间 | 有 | 有 | |
+| 顶栏页数 / 体积 | 有 | 有 | |
+| 在资源管理器定位 | 有 | 有 | |
+| 复制文本到剪贴板 | 有 | 有 | |
+| 版权页 | 有 | 有 | 版权文字与原版一致 |
+
+---
+
+## 13. 交付物清单
+
+- `dist\PDFRev.exe` — 单文件便携版（4.49 MB）
+- `dist\LICENSE-PDFRev.txt`
+- `README.md` — 使用与构建说明
+- `handoff.md` — 本文件
+- 源码：`src\`（前端）+ `src-tauri\src\`（Rust）
+- 工具：`tools\build.ps1`、`tools\selfcheck.ps1`
+
+发布版不含 `src-tauri\target\`（已 gitignore）。

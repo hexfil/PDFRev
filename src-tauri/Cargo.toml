@@ -1,0 +1,31 @@
+[package]
+name = "pdfrev"
+version = "1.0.0"
+description = "PDFRev - PDF 页面修改器（Tauri 2 版）"
+authors = ["何险峰 (He Xianfeng)"]
+license = "SEE LICENSE IN LICENSE-PDFRev.txt"
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "pdfrev_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+lopdf = { version = "0.45", default-features = false, features = ["chrono-clock"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

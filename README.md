@@ -1,0 +1,214 @@
+# PDFRev_Tauri — PDFRev 的 Tauri 2 重写版
+
+用 **Tauri 2（Rust + WebView2）** 重写已完成的 PDFRev 桌面版，功能一一对应。
+前端界面逻辑直接复用原版（`src/app.js` 一行未改），后端换成 Rust。
+
+## 为什么/和原版的关系
+
+| 项 | 原版（Electron） | 本版（Tauri 2） |
+|---|---|---|
+| 运行时 | 自带 Chromium + Node | 用系统 WebView2（Win10+ 自带） |
+| PDF 处理 | `pdf-lib`（JS） | `lopdf`（Rust） |
+| 产物 | 便携版 7z 61.44 MB / 解压 233 MB | **单个 exe 4.49 MB** |
+| 界面代码 | `src/renderer/app.js` | 同一个文件，复制过来未改 |
+
+体积差 50 倍，是因为 Tauri 不打包浏览器引擎。
+代价：依赖系统 WebView2（Win10 1803+ 通常已预装；本机版本 153.0.4234.48）。
+
+## 功能对照（与原版完全一致）
+
+| 功能 | 实现位置 |
+|---|---|
+| 打开 PDF（按钮 / 拖入窗口） | `open_pdf` / 拖入走内存打开 |
+| 缩略图渲染、勾选 | 前端（PDF.js），与原版相同 |
+| 删除单页 / 多页 / 范围表达式 | `pdf_op { op: "delete" }` |
+| 拖动缩略图排序 / 输入顺序 | `pdf_op { op: "reorder" }` |
+| 提取为新 PDF | `pdf_op { op: "extract" }` |
+| 旋转 90 / 180 / 270 | `pdf_op { op: "rotate" }` |
+| 插入另一个 PDF（首页/尾页/第 N 页前后） | `pdf_op { op: "insert" }` |
+| 反转全部页序、撤销 | 前端 + `pdf_op` |
+| 双击预览、预览内 Delete 删页 | 前端（与原版相同） |
+| 预览滚轮缩放（以光标为中心） | 前端 |
+| 顶栏完整路径 + 创建/修改时间 | `file:stat` → `stat` |
+| 只读文件保存前询问 | `save` 返回 `READONLY`，确认后 `unlock` |
+| 原子保存（临时文件 + 改名） | `write_file_safe` |
+| 另存为 / 选择保存位置 | `save_as` / `pick_save_path` |
+| 等价命令行 / JSON 展示与复制 | 前端 + `copy_text` |
+| 版权与许可页（首次自动弹） | 前端，与原版同源 |
+
+## 启动
+
+```powershell
+cd F:\PDFRev_Tauri\src-tauri
+cargo run              # 开发运行
+cargo run --release    # 优化运行
+```
+
+首次运行会自动下载并编译依赖（本机实测约 3 分钟；之后增量约 20 秒）。
+
+## 构建发布版
+
+```powershell
+cd F:\PDFRev_Tauri
+powershell -ExecutionPolicy Bypass -File tools\build.ps1
+```
+
+产物：
+
+```
+dist\PDFRev.exe                     4.49 MB（单文件，直接双击运行）
+dist\PDFRev-1.0-win64-nsis-setup.exe   NSIS 安装包（需要 tauri-cli 才能生成）
+```
+
+**单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
+（已实测：把 exe 单独放进空目录，40 项自检全部通过。）
+
+## 测试
+
+### 1. Rust 单元测试（14 项，不需要 GUI）
+
+```powershell
+cd F:\PDFRev_Tauri\src-tauri
+cargo test
+```
+
+覆盖页码表达式解析（含中文 `至`/`，`）、插入位置解析、删除/排序/提取/旋转/插入、
+元数据保留（含 UTF-16 中文标题）、多次重建的稳定性。
+
+### 2. 真实文档端到端（`test/VPEg.pdf`，62 页 / 10.3 MB）
+
+```powershell
+cd F:\PDFRev_Tauri\src-tauri
+cargo run --example vpeg_check
+```
+
+会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
+并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
+
+### 3. 界面端到端自检（40 项，真实 WebView2）
+
+```powershell
+cd F:\PDFRev_Tauri
+powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
+```
+
+在真实窗口里跑完整链路：版权页 → 打开 PDF → 缩略图 → 顶栏信息 → 双击预览
+→ 滚轮缩放 → 预览内 Delete 删页 → 排序 → 撤销 → 旋转 → 保存落盘 → stat
+→ 剪贴板 → 真实文档 62 页渲染 → 无未捕获错误。
+
+报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`（WebView2 是 GUI 进程，
+从终端拿不到 stdout，所以只能落盘）。
+
+## 目录结构
+
+```
+src/                        前端（与原版共享界面逻辑）
+  index.html                界面骨架（含版权页块）
+  app.js                    业务逻辑 —— 直接复用原版，一行未改
+  style.css                 样式
+  bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
+  selfcheck.js              界面端到端自检（--selfcheck 时跑）
+  vendor/pdf.js             PDF.js（渲染缩略图/预览）
+  vendor/pdf.worker.js
+  fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）
+src-tauri/
+  src/lib.rs                全部 IPC 命令（对应原版 main.js + preload.js）
+  src/pdfops.rs             PDF 页面操作核心（对应原版 pdfops.js）+ 14 项单元测试
+  examples/vpeg_check.rs    真实文档端到端验收
+  tauri.conf.json           窗口、CSP、打包配置
+  icons/icon.ico            图标
+tools/
+  build.ps1                 构建 + 自检 + 组装 dist\
+  selfcheck.ps1             跑界面自检并把报告打印出来
+test/
+  tauri-ui.png              界面截图
+```
+
+## 实现要点
+
+### 1. 前端零改动复用
+
+原版 `src/renderer/app.js` 的全部业务逻辑只依赖 `window.api` 这一个接口。
+`src/bridge-tauri.js` 把 Rust 命令包装成同样的 11 个方法，形状完全一致，
+所以界面代码复制过来就能跑。
+
+两处必然差异在这一层吸收掉：
+
+- **二进制过 IPC**：Tauri 传 base64 最稳，桥接层在两端做 base64 ↔ Uint8Array 转换；
+- **拖入文件的磁盘路径**：Tauri 的 webview 拿不到（Electron 靠 `webUtils`），
+  返回空串，于是走 `app.js` 里已有的「内存打开、保存时再选位置」分支 ——
+  这正好就是需求要的「拖入不另存，直接打开」。
+
+### 2. 错误必须归一化成 `{ok:false}`
+
+Rust 侧用 `Err(ErrPayload)` 表达失败，Tauri 会把它变成 **Promise reject**；
+而 Electron 版一律 resolve 成 `{ok:false, code, error}`，界面里的 `fail(res)`
+只认后者。不包一层的话：「页码超范围」这类错误既不会有 toast、
+还会变成未捕获异常。
+
+桥接层的 `call()` 就是干这个的 —— 所有 `invoke` 都走它。
+
+### 3. Tauri 命令参数名要和 Rust 形参名一致
+
+`fn pdf_op(args: OpArgs)` 的调用方必须写 `invoke('pdf_op', { args: {...} })`。
+一开始写成 `{ op, data, args }` 三个平铺字段，报
+`invalid args 'args' for command 'pdf_op': missing field 'op'`，
+表现为所有页面操作静默失败。
+
+### 4. lopdf 的页面树必须自己重建
+
+`rebuild()` 的关键两点：
+
+1. **`Root` 必须是「引用」**：`dictionary!{...}` 内联进去的话，
+   lopdf 的 `catalog()` 沿 `Reference` 找不到，`get_pages()` 返回空，
+   表现成「所有操作后页数都是 0」；
+2. 页面对象要**重新编号并统一挂到新 Pages 节点**，
+   否则和旧文档的对象编号体系冲突。
+
+### 5. PDF 字符串要认 UTF-16
+
+`VPEg.pdf` 的中文标题是 UTF-16BE 无 BOM 写的。只按 UTF-8 解会得到
+`EMMS~…` 这样的乱码。`decode_pdf_string()` 三种形态都处理：
+BOM 标记的 UTF-16、无 BOM 但「偶数长度 + 奇数位大量 0」的 UTF-16BE、
+以及单字节 PDFDocEncoding。写回时统一用 UTF-16BE + BOM。
+
+## 踩过的坑（改代码前看）
+
+1. **自检开关不能用 `window.eval` 注入**：前端为了还原「首次启动」状态会
+   `location.reload()`，reload 后新 document 里注入的全局变量就没了，
+   自检静默不跑（第一次现象是「没有产出报告」）。
+   改成前端每次加载都 `invoke('selfcheck_enabled')` 问一次。
+2. **`localStorage` 会跨运行残留**：版权页「已看过」标记留着的话，
+   第二次跑自检就变成 FAIL。自检要先清标记再 reload（用 sessionStorage
+   打标记避免无限重载）。
+3. **不要手写极简 PDF 当测试固件**：xref 偏移和 `/Length` 稍不对，
+   PDF.js 就读成 0 页，表现成「缩略图一个都没有」，很容易误判成前端 bug。
+   改用 pdf-lib 预生成真 PDF 放 `src/fixtures/`。
+4. **CSP 不含 `unsafe-eval`**：自检里用 `new Function` 拼脚本会被拦
+   （`Evaluating a string as JavaScript violates CSP`）。改成直接
+   `dispatchEvent(new WheelEvent(...))`。
+5. **异步操作途中 `state.bytes` 会短暂是 undefined**：轮询断言里直接解析
+   会炸成 `bytes.slice is not a function`。统一用 `curBytes()` 判空。
+6. **改前端后必须重新 `cargo build`**：前端资源是编译期嵌入 exe 的，
+   只改 `src/*.js` 不重编译的话跑的还是旧代码（踩过一次，白排查半天）。
+7. **`tauri` 的 feature 要和 `tauri.conf.json` 的 allowlist 对齐**：
+   `Cargo.toml` 写了 `features = ["protocol-asset"]` 而配置里没声明，
+   构建直接报「does not match the allowlist」。
+8. **`cargo run --example` 要求文件在 `src-tauri/examples/`**，
+   不是项目根的 `examples/`；里面的 `#[path]` 也要按那个位置算相对路径。
+
+## 版权与许可
+
+与 PDFRev 桌面版/网页版**同源**，条款只在 `LICENSE-PDFRev.txt` 维护：
+
+```
+版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）
+1. 个人非商业使用：自然人个人可免费下载、复制、安装并使用本软件，无需付费。
+2. 商业使用定义：任何企业、机构、组织，无论是否盈利，将本软件用于内部业务、
+   员工办公、批量部署、集成到产品、转售、外包服务场景，均属于商业使用。
+   商业使用必须联系版权方获得使用许可。
+3. 禁止行为：禁止未经许可的逆向工程、反编译、反汇编、修改、二次分发。
+4. 本软件不提供任何质保。
+```
+
+界面里的版权页沿用原版（`src/index.html` + `app.js` 里的生成块）。

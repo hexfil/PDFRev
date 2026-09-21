@@ -1,0 +1,37 @@
+PDFRev 版权与许可
+=================
+
+版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）
+
+
+1. 个人非商业使用
+------------------
+自然人个人可免费下载、复制、安装并使用本软件，无需付费。
+
+
+2. 商业使用定义
+----------------
+任何企业、机构、组织，无论是否盈利，将本软件用于内部业务、员工办公、
+批量部署、集成到产品、转售、外包服务场景，均属于商业使用。
+商业使用必须联系版权方获得使用许可。
+
+
+3. 禁止行为
+------------
+禁止未经许可的逆向工程、反编译、反汇编、修改、二次分发。
+
+
+4. 免责
+--------
+本软件不提供任何质保。
+
+----------------------------------------------------------------------
+Copyright © 2026, He Xianfeng (xfhe@ipe.ac.cn). All rights reserved.
+
+Personal non-commercial use is free of charge. Any use by a company,
+institution or organization - internal business, staff office work,
+mass deployment, product integration, resale or outsourced services -
+is commercial use and requires a licence from the copyright holder.
+Reverse engineering, decompilation, disassembly, modification and
+redistribution without permission are prohibited. This software is
+provided without warranty of any kind.

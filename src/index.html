@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<!-- CSP 由 src-tauri/tauri.conf.json 统一声明（需要放行 ipc: 供 Tauri IPC 使用） -->
+<title>PDFRev - PDF 页面修改器</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header class="toolbar">
+    <div class="brand">PDFRev</div>
+    <button id="btnOpen" class="primary">打开 PDF</button>
+    <button id="btnSave" disabled>保存</button>
+    <button id="btnSaveAs" disabled>另存为</button>
+    <span class="sep"></span>
+    <button id="btnUndo" disabled title="Ctrl+Z">撤销</button>
+    <button id="btnCopyright" class="mini" title="查看版权与使用许可">版权</button>
+    <span class="fileinfo" id="fileInfo">未打开文件</span>
+  </header>
+
+  <main>
+    <section class="pages" id="pagesPane">
+      <div class="pane-head">
+        <span class="title">页面</span>
+        <span class="muted" id="pageCount"></span>
+        <span class="spacer"></span>
+        <button id="btnSelectAll" class="mini">全选</button>
+        <button id="btnSelectNone" class="mini">清空选择</button>
+        <button id="btnSelectInvert" class="mini">反选</button>
+      </div>
+      <div id="thumbs" class="thumbs">
+        <div class="empty">打开一个 PDF 开始</div>
+      </div>
+      <div class="pane-foot">
+        <button id="btnRotateLeft" disabled title="选中页逆时针旋转 90°">↺ 左转</button>
+        <button id="btnRotateRight" disabled title="选中页顺时针旋转 90°">↻ 右转</button>
+        <button id="btnDeleteSel" class="danger" disabled>删除选中页</button>
+        <span class="spacer"></span>
+        <span class="muted" id="selInfo">已选 0 页</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="card">
+        <h3>按页码操作</h3>
+        <label>页码表达式</label>
+        <input id="exprPages" placeholder="如 2  或  3,5,8  或  3-5  或  5-end" />
+        <div class="row">
+          <button id="btnExprDelete" disabled>删除这些页</button>
+          <button id="btnExprExtract" disabled>提取为新 PDF</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>页面排序</h3>
+        <label>新顺序（逗号分隔的页码）</label>
+        <input id="orderInput" placeholder="如 3,1,2,4-6（未列出的页自动排到末尾）" />
+        <div class="row">
+          <button id="btnApplyOrder" disabled>应用排序</button>
+          <button id="btnReverse" disabled>反转全部页序</button>
+        </div>
+        <p class="hint">也可以直接拖动左侧缩略图调整顺序。</p>
+      </div>
+
+      <div class="card">
+        <h3>插入另一个 PDF</h3>
+        <div class="row">
+          <button id="btnPickInsert">选择要插入的 PDF…</button>
+          <button id="btnInsert" class="primary" disabled>插入</button>
+        </div>
+        <p class="muted" id="insertFile">未选择文件</p>
+        <label>插入位置</label>
+        <select id="insertAt">
+          <option value="head">首页（最前面）</option>
+          <option value="tail">尾页（最后面）</option>
+          <option value="custom">自定义…</option>
+        </select>
+        <input id="insertAtCustom" placeholder="如 before:3 / after:4 / head / tail" style="display:none" />
+        <label>插入该文件的哪些页（可留空 = 全部）</label>
+        <input id="insertPages" placeholder="如 1-2 或 3" />
+      </div>
+
+      <div class="card cli">
+        <h3>命令行等价</h3>
+        <pre id="cliOut">拖拽或点击操作后，这里显示对应的 pdfrev 命令。</pre>
+        <div class="row">
+          <button id="btnCopyCli" class="mini">复制命令</button>
+          <button id="btnCopyCliJson" class="mini">复制 JSON</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- 拖拽文件到中心区域打开 -->
+  <div id="dropzone" class="dropzone hidden">
+    <div class="dz-box">
+      <div class="dz-icon">PDF</div>
+      <div class="dz-text">松开以打开 PDF</div>
+      <div class="dz-hint">也可以拖到窗口任意位置</div>
+    </div>
+  </div>
+
+  <!-- 页面预览：双击缩略图打开，Delete 删除当前页 -->
+  <div id="preview" class="preview hidden">
+    <div class="pv-bar">
+      <span class="pv-title" id="pvTitle">第 1 页</span>
+      <span class="spacer"></span>
+      <button id="pvPrev" class="mini">← 上一页</button>
+      <button id="pvNext" class="mini">下一页 →</button>
+      <span class="pv-zoom">
+        <button id="pvZoomOut" class="mini" title="缩小（滚轮向下 / Ctrl+-）">−</button>
+        <button id="pvZoomFit" class="mini" title="适应窗口（Ctrl+0）">适应</button>
+        <button id="pvZoom100" class="mini" title="实际大小 100%（Ctrl+1）">100%</button>
+        <button id="pvZoomIn" class="mini" title="放大（滚轮向上 / Ctrl++）">+</button>
+        <span class="pv-zoomval" id="pvZoomVal">100%</span>
+      </span>
+      <button id="pvDelete" class="danger">删除此页 (Delete)</button>
+      <button id="pvClose" class="mini">关闭 (Esc)</button>
+    </div>
+    <div class="pv-stage" id="pvStage">
+      <canvas id="pvCanvas"></canvas>
+      <div class="pv-loading hidden" id="pvLoading">渲染中…</div>
+    </div>
+    <div class="pv-foot">
+      <span class="muted">滚轮缩放（或 Ctrl+滚轮）· 双击空白关闭 · Delete 删除本页 · ← → 翻页 · Esc 关闭</span>
+    </div>
+  </div>
+
+  <!-- 通用确认框 -->
+  <div id="confirm" class="confirm hidden">
+    <div class="cf-box">
+      <div class="cf-msg" id="confirmMsg"></div>
+      <div class="cf-btns">
+        <button id="confirmCancel">取消</button>
+        <button id="confirmOk" class="primary">确定</button>
+      </div>
+    </div>
+  </div>
+  <!-- 版权与许可（由 tools/sync-copyright.js 生成，勿手改） -->
+  <div id="copyright" class="copyright hidden">
+    <div class="cr-box">
+      <h2 class="cr-title">版权与许可</h2>
+      <p class="cr-holder">版权所有 © 2026， 何险峰 (He Xianfeng,  xfhe@ipe.ac.cn）</p>
+      <ol class="cr-list">
+        <li><b>1. 个人非商业使用：</b>自然人个人可免费下载、复制、安装并使用本软件，无需付费。</li>
+        <li><b>2. 商业使用定义：</b>任何企业、机构、组织，无论是否盈利，将本软件用于内部业务、员工办公、批量部署、集成到产品、转售、外包服务场景，均属于商业使用。商业使用必须联系版权方获得使用许可。</li>
+        <li><b>3. 禁止行为：</b>禁止未经许可的逆向工程、反编译、反汇编、修改、二次分发。</li>
+        <li><b>4. 免责：</b>本软件不提供任何质保。</li>
+      </ol>
+      <div class="cr-btns">
+        <button id="crClose" class="primary">关闭</button>
+      </div>
+    </div>
+  </div>
+  <!-- /版权与许可 -->
+</div>
+<script src="vendor/pdf.js"></script>
+<script src="bridge-tauri.js"></script>
+<script src="selfcheck.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
+

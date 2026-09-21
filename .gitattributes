@@ -1,0 +1,22 @@
+# 统一行尾，避免 Windows / Linux 协作时整文件显示为「已修改」
+* text=auto
+
+*.rs    text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.toml  text eol=lf
+
+# 批处理必须保持 CRLF，否则部分 Windows 环境下执行异常
+*.bat   text eol=crlf
+
+# 打包脚本必须是 UTF-8 带 BOM（见原版 handoff.md 12.4 的说明）
+*.ps1   text eol=crlf
+
+# 二进制：禁止 Git 做行尾转换，否则文件会被损坏
+*.pdf   binary
+*.png   binary
+*.ico   binary
+*.exe   binary

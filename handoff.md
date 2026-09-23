@@ -3,7 +3,7 @@
 > 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
 > 最后更新：2026-09-21（v0.12.0：国际化 + 英文标题 PDF Revisor + 版权页版本号/主页链接 + `--version`）
 >
-> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 96 项，全部通过。
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 103 项，全部通过。
 
 ---
 
@@ -199,11 +199,16 @@ example 必须放在 `src-tauri/examples/`，`#[path]` 按该位置解析。
 
 超大 payload、含 shell 行继续符（反引号）的 here-string、含下载 URL 的 here-string 都会被策略拒。改用**分块 AppendAllText** 或字符串数组 join 写入。
 
-### 5.15 拖入文件的磁盘路径拿不到（这是特性，不是 bug）
+### 5.15 拖入文件的磁盘路径（v0.12.0 已解决，结论见 5.28）
 
-Tauri 的 webview 拿不到拖入文件的真实路径（Electron 靠 webUtils）。
-桥接层 `getFilePath()` 返回空串，于是走 app.js 里已有的「内存打开、保存时再选位置」分支 —— 正好就是需求要的「拖入不另存，直接打开」。
-因此 `tauri.conf.json` 里 `dragDropEnabled: false`，让 HTML5 拖放生效。
+**曾经的结论**：Tauri 的 webview 用 HTML5 拖放拿不到拖入文件的真实路径
+（Electron 靠 `webUtils`），所以 `dragDropEnabled: false`、走「内存打开、
+保存时再选位置」。
+
+**现状（已推翻）**：改成 `dragDropEnabled: true` + Rust 侧
+`WindowEvent::DragDrop`，**能拿到真实路径**，于是拖入后 Ctrl+S 直接覆盖原文件。
+代价与配套改动（缩略图排序改 pointer 事件）见 **5.28**。
+`bridge.getFilePath()` 仍保留（返回空串）只为对齐 `window.api` 的形状。
 ### 5.17 版权页的序号是 <ol> 给的，文本里不能再写「1.」
 
 条款用 `<ol>` 渲染，序号由 `<ol>` 自己生成。代码里只写小标题：
@@ -262,7 +267,44 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
 修法：生成标记改成独一无二的 `/* ==== CLI-HELP-BLOCK:`，
 手写段另起一个不同措辞的注释头，并在注释里写明「别改成和生成标记一样」。
 
-### 5.27 仓库改名为 woxii88/PDFRev（去掉 Tauri 后缀）
+### 5.28 保存＝直接覆盖；拖入文件的真实路径；Windows 上拖放二选一
+
+**用户要求**：`Ctrl+S` 保存直接覆盖原文件，不弹询问框（与 Electron 版行为一致）。
+
+**卡点**：Tauri 的 webview **拿不到 HTML5 拖入文件的磁盘路径**（Electron 靠
+`webUtils.getPathForFile`）。拿不到路径 → `state.filePath` 为空 → 保存只能弹
+「选择保存位置」，于是每次都像「另存为」。
+
+**结论：Windows 上原生拖放与 HTML5 拖放互斥**（tauri-apps/tauri#15138）：
+  - `dragDropEnabled: true` → 能从 Rust 侧拿到**真实路径**，但 HTML5 的
+    dragover/drop 不再触发，`dataTransfer.files` 也拿不到内容；
+  - `dragDropEnabled: false` → HTML5 拖放正常，但外部文件的路径/内容全丢。
+
+所以本版做了两件事（缺一不可）：
+1. `tauri.conf.json` 改 `dragDropEnabled: true`，在 Rust 的 `setup` 里
+   `on_window_event` 监听 `WindowEvent::DragDrop`，把路径用 `eval` 交给前端：
+     `window.__pdfrevDragHover(true/false)` 显示/隐藏拖放遮罩
+     `window.__pdfrevDropPath('D:\\a.pdf')` 打开该文件（filePath 有值 →
+     以后 Ctrl+S 直接覆盖）
+   路径用 `serde_json::Value::String(..).to_string()` 转义后再拼进 `eval`，
+   否则文件名里的引号/反斜杠会把脚本拼坏。
+2. 缩略图**排序**从 HTML5 拖放改成 **pointer 事件**（`bindDrag`）：
+   `pointerdown` → `pointermove` 超过 6px 才算拖动（小于阈值仍算点击/双击预览）
+   → `pointerup` 按落点标记重排。用 `setPointerCapture` 保证移出卡片后
+   仍能收到事件；拖动后置 `suppressClick` 吞掉紧随的 click，避免顺带勾选。
+
+**保存不弹询问**：`saveToPath` 遇到 `code === 'READONLY'` 不再 `askConfirm`，
+直接带 `unlock: true` 重存一次；成功 toast 会说明「已清除只读属性」。
+想换位置就用【另存为】。
+
+**自检新增 7 项**（96 → 103）：
+  - 插入位置下拉含「最后一页之后」/ 无越界页码（删页后必须 `rebuildInsertAt`）
+  - 插入 PDF（内存 data）成功、页数 +N
+  - 插入缺源文件时报 `pdf.noInsertSource`，而不是「目录不存在」
+  - 保存到已有路径＝原地覆盖（路径不变）
+  - 只读文件也能直接覆盖（`selfcheck_set_readonly` 先设只读再存）
+  - 前端已接原生拖放钩子
+### 5.27 仓库改名为 PDFRev（去掉 Tauri 后缀；用户名后改为 He-XF）
 
 用户要求 GitHub 上只叫 PDFRev。做的事：
 
@@ -446,14 +488,14 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 
     & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
 
-### 6.3 界面端到端自检（96 项，跑在真实 WebView2 里）
+### 6.3 界面端到端自检（103 项，跑在真实 WebView2 里）
 
 `src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
 
 **为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
 只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
 
-覆盖清单（96 项）：
+覆盖清单（103 项）：
 | 组 | 项数 | 覆盖内容 |
 |---|---|---|
 | 版权页 | 23 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、文案与 i18n 词典一致、可关闭、显示版本号（取自 Rust）、版本号与 Rust 一致、不等于 0.1.0、含 GitHub 链接、链接文本含主机名、桥接层三个新方法、openUrl 拒绝 file:// |
@@ -464,9 +506,9 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | 缩略图 | 2 | 打开后渲染 5 个缩略图、canvas 有内容像素（PDF.js 可用） |
 | 顶栏信息 | 3 | 文件名/页数/大小、完整磁盘路径、创建与修改时间 |
 | 预览 | 5 | 双击打开、停在正确页、滚轮放大、滚轮缩小、Delete 删当前页 |
-| 页面操作 | 6 | 删除后页序正确、关闭预览后缩略图数、排序生效、撤销排序、旋转后可解析、旋转不改页序 |
-| 保存 | 3 | save 落盘、磁盘文件页数、stat 返回时间 |
-| 剪贴板与路径 | 2 | 写剪贴板、桥接层不返回磁盘路径（拖入走内存分支） |
+| 页面操作 | 8 | 删除后页序正确、关闭预览后缩略图数、排序生效、撤销排序、旋转后可解析、旋转不改页序、插入位置下拉含「最后一页之后」、下拉无越界页码（删页后重建） |
+| 保存 | 6 | save 落盘、磁盘文件页数、stat 返回时间、原地覆盖（不另存）、只读文件直接覆盖（自动清只读）、前端已接原生拖放钩子 |
+| 剪贴板与插入 | 3 | 写剪贴板、插入 PDF（内存 data）成功且页数 +N、插入缺源文件报 pdf.noInsertSource（而不是「目录不存在」） |
 | 真实文档 | 6 | 打开 VPEg.pdf、报 62 页、中文标题 UTF-16BE 正确解码、渲染 62 缩略图、缩略图有内容、删除第 1 页 |
 | 稳定性 | 3 | 可重开帮助面板、窗口置前、渲染进程无未捕获错误 |
 | 国际化 | 20 | 语言选择框存在、2 个选项、选项用各语言自身名称、所有 data-i18n 标记都能查到词条、静态标记覆盖 >=50 处、切英文后按钮文案变英文、`<html lang>` 变 en、标签变英文、版权页变英文、页数文案变英文（pages）、选择被 localStorage 记住、后端错误按语言渲染、切回中文后复原、缩略图角标重画、切语言不改页数、英文网页标题为 PDF Revisor、原生窗口标题读回为 PDF Revisor、切回中文后原生标题复原 |
@@ -510,7 +552,7 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 4. **插入后页面树扁平化**：插入会把页树展平，书签 / 大纲会丢。原版 Electron 版同样如此，不算回归。
 5. **copy_referenced() 只深拷一层**：嵌套资源（表单 XObject 里的引用）可能不全。VPEg.pdf 及常规文档不受影响。
 6. **图标是脚本生成的几何图形**，不是设计稿。
-7. **拖入文件拿不到磁盘路径**：见 5.15，行为符合需求。
+7. **拖入文件走原生拖放拿路径**：见 5.28。代价是 Windows 上 HTML5 拖放被接管，缩略图排序已改用 pointer 事件。
 
 ---
 
@@ -555,8 +597,8 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 96 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,709,376 字节（4.49 MB），版本号 0.12.0 |
+| 界面自检 | 103 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,717,056 字节（4.50 MB），版本号 0.12.0 |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
 | 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.49 MB（1.93%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
@@ -564,7 +606,7 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
 | 多语言 | 界面全量支持简中 / 英文，顶栏语言选择框，后端错误也按语言渲染，窗口标题同步（20 项断言） |
 | 版本号与主页 | 版权页显示 PDFRev 0.12.0 与可点击 GitHub 链接；`PDFRev.exe --version` / -V 打印版本号并返回 0 |
-| 校验值 | sha256 9076A0704E383A4A5B47F4311116ABA07E4FE394949A71290D5AFD0733C4B04B |
+| 校验值 | sha256 591D5D88BEDF337D503FA120BDDCDAF7A1E006810726B96073894A9733F79A48 |
 
 ---
 
@@ -573,7 +615,7 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | 功能 | 原版 | Tauri 版 | 备注 |
 |---|---|---|---|
 | 打开 PDF（对话框 / 多选） | 有 | 有 | |
-| 拖拽文件到中心区域打开 | 有 | 有 | 不另存，直接读内存（见 5.15） |
+| 拖拽文件到中心区域打开 | 有 | 有 | 走原生拖放拿真实路径，之后保存直接覆盖（见 5.28） |
 | 缩略图列表 + 点击翻页 | 有 | 有 | |
 | 拖拽排序页面 | 有 | 有 | |
 | 删除页 / 按范围删 | 有 | 有 | |

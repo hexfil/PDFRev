@@ -651,11 +651,21 @@ fn pdf_op(args: OpArgs) -> Result<OpResult, ErrPayload> {
                 .or_else(|| jstr(&a, "position"))
                 .unwrap_or_else(|| "tail".into());
             let ins = jstr(&a, "insertPages");
-            // 待插入内容可以来自内存（data）也可以来自磁盘（pdfPath）
+            // 待插入内容可以来自内存（data）也可以来自磁盘（pdfPath）。
+            // 两者都没有时必须明确报错：早期版本会走到「空路径 -> 当前工作目录」，
+            // 于是报出「目标目录不存在 F:\PDFRev_Tauri」这种让人摸不着头脑的提示。
             let add = match jstr(&a, "data") {
                 Some(d) => decode_b64(&d)?,
                 None => {
                     let p = jstr(&a, "pdfPath").unwrap_or_default();
+                    if p.trim().is_empty() {
+                        return Err(ErrPayload::keyed(
+                            "NOINSERT",
+                            "pdf.noInsertSource",
+                            serde_json::json!({}),
+                            "no PDF was provided to insert (pick one first)",
+                        ));
+                    }
                     let abs = abs_path(&p);
                     fs::read(&abs).map_err(|e| {
                         let (c, k, a, m) = explain_io(&e, &abs, false);
@@ -775,6 +785,25 @@ fn set_window_title(app: tauri::AppHandle, title: String) -> Result<serde_json::
     })?;
     Ok(serde_json::json!({ "ok": true }))
 }
+/// 自检专用：给文件加/去只读属性（验证「只读文件也能直接覆盖」）。
+///
+/// 放到 Rust 侧做是因为 JS 改不了文件属性；只在 --selfcheck 时被调用。
+#[tauri::command]
+fn selfcheck_set_readonly(path: String, on: bool) -> Result<serde_json::Value, ErrPayload> {
+    let abs = abs_path(&path);
+    let meta = fs::metadata(&abs).map_err(|e| {
+        let (c, k, a, m) = explain_io(&e, &abs, false);
+        ErrPayload::keyed_or_raw(c, k, a, m)
+    })?;
+    let mut perm = meta.permissions();
+    perm.set_readonly(on);
+    fs::set_permissions(&abs, perm).map_err(|e| {
+        let (c, k, a, m) = explain_io(&e, &abs, false);
+        ErrPayload::keyed_or_raw(c, k, a, m)
+    })?;
+    Ok(serde_json::json!({ "ok": true, "readonly": on }))
+}
+
 /// 把窗口置前（外部截屏脚本用；自检跑完想让界面留在最前面时调它）
 #[tauri::command]
 fn selfcheck_front(app: tauri::AppHandle) -> Result<String, ErrPayload> {
@@ -866,7 +895,7 @@ fn selfcheck_report(text: String, done: bool) -> Result<serde_json::Value, ErrPa
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 项目主页（版权页要显示、也要能点开）
-pub const APP_REPO_URL: &str = "https://github.com/woxii88/PDFRev";
+pub const APP_REPO_URL: &str = "https://github.com/He-XF/PDFRev";
 
 /// 往控制台打一行字。
 ///
@@ -1055,6 +1084,7 @@ pub fn run() {
             selfcheck_enabled,
             selfcheck_front,
             selfcheck_window_title,
+            selfcheck_set_readonly,
             set_window_title,
             app_version,
             app_repo_url,
@@ -1065,6 +1095,56 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.eval("void 0;"); // 自检开关改由 selfcheck_enabled 命令提供
+
+                // 原生拖放：拖动经过时高亮提示，松手时把**真实磁盘路径**交给前端。
+                //
+                // 为什么用 Rust 侧事件而不是 HTML5 drag/drop：
+                // Windows 上 `dragDropEnabled: true` 会接管 webview 的拖放，
+                // HTML5 的 dataTransfer.files 拿不到内容、也拿不到路径
+                // （tauri-apps/tauri#15138）。有了路径，「保存 / Ctrl+S」就能
+                // 直接覆盖原文件，而不是每次都弹「另存为」。
+                // 注意：webview 侧需 `dragDropEnabled: false` 才能用 HTML5 拖放，
+                // 二者在 Windows 上互斥 —— 所以缩略图排序改用 pointer 事件。
+                let h = w.clone();
+                w.on_window_event(move |ev| {
+                    if let tauri::WindowEvent::DragDrop(dde) = ev {
+                        match dde {
+                            tauri::DragDropEvent::Enter { .. } | tauri::DragDropEvent::Over { .. } => {
+                                let _ = h.eval(
+                                    "window.__pdfrevDragHover && window.__pdfrevDragHover(true);",
+                                );
+                            }
+                            tauri::DragDropEvent::Leave => {
+                                let _ = h.eval(
+                                    "window.__pdfrevDragHover && window.__pdfrevDragHover(false);",
+                                );
+                            }
+                            tauri::DragDropEvent::Drop { paths, .. } => {
+                                let _ = h.eval(
+                                    "window.__pdfrevDragHover && window.__pdfrevDragHover(false);",
+                                );
+                                // 只挑第一个 PDF；路径用 JSON 转义后拼进 eval，
+                                // 免得文件名里的引号/反斜杠把脚本拼坏。
+                                let pdf = paths.iter().find(|p| {
+                                    p.extension()
+                                        .map(|e| e.eq_ignore_ascii_case("pdf"))
+                                        .unwrap_or(false)
+                                });
+                                if let Some(p) = pdf {
+                                    let json = serde_json::Value::String(
+                                        p.display().to_string(),
+                                    )
+                                    .to_string();
+                                    let _ = h.eval(&format!(
+                                        "window.__pdfrevDropPath && window.__pdfrevDropPath({});",
+                                        json
+                                    ));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                });
             }
             Ok(())
         })

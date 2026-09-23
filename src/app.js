@@ -203,7 +203,7 @@ async function renderThumbs() {
     const card = document.createElement('div');
     card.className = 'thumb';
     card.dataset.page = String(i);
-    card.draggable = true;
+    // 不用 HTML5 draggable：Windows 上原生拖放与它互斥（见 bindDrag 注释）
 
     const chk = document.createElement('input');
     chk.type = 'checkbox';
@@ -230,6 +230,8 @@ async function renderThumbs() {
     card.appendChild(meta);
 
     card.addEventListener('click', () => {
+      // 刚做完拖拽排序的那一次 click 不要当成「勾选」
+      if (suppressClick) { suppressClick = false; return; }
       chk.checked = !chk.checked;
       chk.dispatchEvent(new Event('change'));
     });
@@ -285,45 +287,93 @@ function safeDestroy(doc) {
   } catch (e) { /* ignore */ }
 }
 
-/* ---------------- 拖拽排序 ---------------- */
+/* ---------------- 拖拽排序（鼠标事件实现） ----------------
 
-let dragSrc = null;
+   为什么不用 HTML5 的 dragstart/drop：Windows 上 Tauri 的
+   `dragDropEnabled: true`（拿拖入文件的真实磁盘路径所必需，见 handoff 5.28）
+   会直接把 webview 的 HTML5 拖放接管掉 —— 内部拖动会变成「🚫 禁止」光标，
+   dragover / drop 一个都不来（tauri-apps/tauri#15138）。两者在 Windows 上
+   无法共存，所以内部排序改用 pointer 事件自己实现，与外部拖入互不干扰。
+*/
 
-function bindDrag(card) {
-  card.addEventListener('dragstart', (e) => {
-    dragSrc = card;
-    card.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', card.dataset.page);
-  });
-  card.addEventListener('dragend', () => {
-    card.classList.remove('dragging');
-    clearDropMarks();
-    dragSrc = null;
-  });
-  card.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (!dragSrc || dragSrc === card) return;
-    const rect = card.getBoundingClientRect();
-    const after = e.clientX > rect.left + rect.width / 2;
-    card.classList.toggle('drop-before', !after);
-    card.classList.toggle('drop-after', after);
-  });
-  card.addEventListener('dragleave', () => {
-    card.classList.remove('drop-before', 'drop-after');
-  });
-  card.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    const after = card.classList.contains('drop-after');
-    clearDropMarks();
-    if (!dragSrc || dragSrc === card) return;
-    const pane = $('thumbs');
-    if (after) card.after(dragSrc); else card.before(dragSrc);
-    const order = [...pane.querySelectorAll('.thumb')].map((el) => Number(el.dataset.page));
-    await applyOrder(order, t('card.order.dragged'));
-  });
+let dragSrc = null;        // 正在被拖的卡片
+let dragMoved = false;     // 是否真的移动过（用来区分「点击」和「拖动」）
+let suppressClick = false; // 拖动结束后吞掉紧随其后的 click
+
+/** 拖动过程中在光标下找目标卡片，给左右两侧加落点标记 */
+function markDropTarget(x, y) {
+  if (!dragSrc) return null;
+  const pane = $('thumbs');
+  let target = null;
+  let after = false;
+  for (const el of pane.querySelectorAll('.thumb')) {
+    if (el === dragSrc) continue;
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      target = el;
+      after = x > r.left + r.width / 2;
+      break;
+    }
+  }
+  document.querySelectorAll('.thumb').forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+  if (target) target.classList.add(after ? 'drop-after' : 'drop-before');
+  return target;
 }
+
+function endCardDrag(cancel) {
+  if (!dragSrc) return;
+  const src = dragSrc;
+  const pane = $('thumbs');
+  const marked = pane.querySelector('.thumb.drop-before, .thumb.drop-after');
+  const after = !!(marked && marked.classList.contains('drop-after'));
+  const moved = dragMoved;
+  src.classList.remove('dragging');
+  clearDropMarks();
+  dragSrc = null;
+  dragMoved = false;
+  if (cancel || !moved || !marked) return;
+  suppressClick = true;   // 这次是拖动，不要顺带把页面勾选上
+  if (after) marked.after(src); else marked.before(src);
+  const order = [...pane.querySelectorAll('.thumb')].map((el) => Number(el.dataset.page));
+  applyOrder(order, t('card.order.dragged'));
+}
+
+/** 指针事件排序：按住左键移动超过阈值才算拖动，否则交给 click/dblclick */
+function bindDrag(card) {
+  card.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;                 // 只认左键
+    if (e.target && e.target.classList && e.target.classList.contains('chk')) return;
+    dragSrc = card;
+    dragMoved = false;
+  });
+
+  card.addEventListener('pointermove', (e) => {
+    if (!dragSrc || dragSrc !== card) return;
+    if (!dragMoved) {
+      // 阈值 6px：小于它当作点击（勾选 / 双击预览），避免误触发排序
+      if (Math.abs(e.movementX) + Math.abs(e.movementY) < 6) return;
+      // 用 pointer capture 保证移出卡片后仍能收到 move/up
+      try { card.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      dragSrc.classList.add('dragging');
+      dragMoved = true;
+    }
+    markDropTarget(e.clientX, e.clientY);
+  });
+
+  card.addEventListener('pointerup', (e) => {
+    if (!dragSrc || dragSrc !== card) return;
+    try { card.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    endCardDrag(false);
+  });
+
+  card.addEventListener('pointercancel', () => endCardDrag(true));
+
+  // 拖动结束时如果指针在窗口外，pointerup 收不到，用 Esc 兜底取消
+  card.addEventListener('keydown', (e) => { if (e.key === 'Escape') endCardDrag(true); });
+}
+
+// 拖到卡片外松手也要收尾（pointer capture 之后事件仍在卡片上，这里兜底）
+window.addEventListener('pointerup', () => { if (dragSrc) endCardDrag(false); });
 
 function clearDropMarks() {
   document.querySelectorAll('.thumb').forEach((el) => el.classList.remove('drop-before', 'drop-after'));
@@ -363,6 +413,11 @@ async function doOp(op, args, cmd, json, label) {
   }
   const info = await bridge.info(state.bytes);
   if (info.ok) state.total = info.info.pages;
+  // 页数变了，插入位置下拉必须重建：它列的是 before:N / after:N，
+  // 不重建就会留着已经不存在（或越界）的页码，
+  // 于是「插入到最后一页之后」会失败、或插到错误位置（踩过）。
+  rebuildInsertAt();
+  syncToolbar();
   setCmd(cmd, json);
   toast(label || t('toast.done'));
   await renderThumbs();
@@ -387,16 +442,18 @@ $('btnOpen').addEventListener('click', async () => {
 });
 
 /**
- * 保存到已有路径。
- * 目标文件带只读属性时（常见于从微信/网盘/邮件另存出来的 PDF），
- * Windows 会直接抛 EPERM「operation is not permitted」。
- * 这种情况先问用户，同意后清除只读属性再覆盖。
+ * 保存到已有路径（覆盖）。
+ *
+ * 用户要求「保存 / Ctrl+S 直接覆盖原文件，不弹提示」，所以这里不做任何询问：
+ * 目标文件带只读属性时（常见于从微信/网盘/邮件另存出来的 PDF）Windows 会抛
+ * EPERM「operation is not permitted」，我们**自动**清掉只读位再写一次，
+ * 并在保存成功后用 toast 告诉用户「已清除只读属性」。
+ * 想换个位置存，用【另存为】。
  */
 async function saveToPath(target, unlock) {
   let res = await bridge.save(target, state.bytes, !!unlock);
   if (res && res.ok === false && res.code === 'READONLY') {
-    const yes = await askConfirm(t('toast.readonlyAsk', { msg: tErr(res) }));
-    if (!yes) return null;
+    // 不询问，直接解除只读后覆盖
     res = await bridge.save(target, state.bytes, true);
   }
   if (fail(res)) return null;
@@ -1084,87 +1141,41 @@ $('confirmOk').addEventListener('click', () => settleConfirm(true));
 $('confirmCancel').addEventListener('click', () => settleConfirm(false));
 $('confirm').addEventListener('click', (e) => { if (e.target === $('confirm')) settleConfirm(false); });
 
-/* ---------------- 拖拽文件到中心区域打开 ---------------- */
+/* ---------------- 拖拽文件到窗口打开 ----------------
 
-/** 只判断"拖的是文件"；缩略图内部排序拖动带 text/plain，不显示遮罩 */
-function isFileDrag(e) {
-  const dt = e.dataTransfer;
-  if (!dt) return false;
-  if (dt.types && Array.from(dt.types).indexOf('Files') >= 0) return true;
-  return false;
-}
+   走 Tauri 的**原生**拖放事件（Rust 侧监听后 eval 回来），不是 HTML5 drag/drop。
+   原因：Windows 上两者互斥（tauri-apps/tauri#15138）——
+     * 只有原生拖放能拿到拖入文件的**真实磁盘路径**；
+     * 有了路径，「保存 / Ctrl+S」才能像桌面版一样直接覆盖原文件；
+     * 代价是 HTML5 的 dragover/drop 不再触发，所以这里不再监听它，
+       缩略图内部排序也改成了 pointer 事件（见 bindDrag）。
 
-let dragDepth = 0;
+   Rust 侧调用的两个钩子：
+     window.__pdfrevDragHover(true/false)  拖动进入 / 离开 → 显示遮罩
+     window.__pdfrevDropPath('D:\\a.pdf')  松手 → 带真实路径打开
+*/
+
 const dz = () => $('dropzone');
 
-window.addEventListener('dragenter', (e) => {
-  if (!isFileDrag(e)) return;
-  e.preventDefault();
-  dragDepth++;
-  dz().classList.remove('hidden');
-  $('thumbs').classList.add('drag-over');
-});
-
-window.addEventListener('dragover', (e) => {
-  if (!isFileDrag(e)) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-});
-
-window.addEventListener('dragleave', (e) => {
-  if (!isFileDrag(e)) return;
-  dragDepth = Math.max(0, dragDepth - 1);
-  if (dragDepth === 0) {
-    dz().classList.add('hidden');
-    $('thumbs').classList.remove('drag-over');
-  }
-});
-
-window.addEventListener('drop', async (e) => {
-  if (!isFileDrag(e)) return;   // 缩略图排序的 drop 由卡片自己处理
-  e.preventDefault();
-  dragDepth = 0;
-  dz().classList.add('hidden');
-  $('thumbs').classList.remove('drag-over');
-  await handleDroppedFiles(e.dataTransfer.files);
-});
-
-async function handleDroppedFiles(fileList) {
-  const files = Array.from(fileList || []);
-  if (!files.length) return;
-  const pdf = files.find((f) => /.pdf$/i.test(f.name));
-  if (!pdf) { toast(t('toast.pdfOnly'), true); return; }
-  if (files.length > 1) toast(t('toast.oneFile', { name: pdf.name }));
-
-  // 取拖入文件的真实磁盘路径（Electron 32 起 File.path 已废弃，走 webUtils）
-  let diskPath = '';
-  try {
-    diskPath = bridge.getFilePath(pdf) || '';
-  } catch (err) {
-    diskPath = '';
-  }
-  // 兜底：老版本 Electron / 某些来源还带 path 属性
-  if (!diskPath && pdf.path) diskPath = pdf.path;
-
-  if (diskPath) {
-    const res = await bridge.readFile(diskPath);
-    if (fail(res)) return;
-    return await loadBytes(new Uint8Array(res.file.data), res.file.path, res.file.name, 'disk');
-  }
-
-  // 拿不到路径：直接用内存里的内容打开，不弹保存框、不写盘。
-  // 之后按“保存”时才让用户选位置。
-  let bytes;
-  try {
-    bytes = new Uint8Array(await pdf.arrayBuffer());
-  } catch (err) {
-    toast(t('toast.readDragFail', { msg: (err && err.message ? err.message : err) }), true);
-    return;
-  }
-  if (!bytes.length) { toast(t('toast.emptyDrag'), true); return; }
-  toast(t('toast.dragOpened'));
-  return await loadBytes(bytes, null, pdf.name, 'drag');
+function showDropHint(on) {
+  dz().classList.toggle('hidden', !on);
+  $('thumbs').classList.toggle('drag-over', !!on);
 }
+
+window.__pdfrevDragHover = (on) => showDropHint(!!on);
+
+window.__pdfrevDropPath = async (path) => {
+  showDropHint(false);
+  if (!path) return;
+  const name = String(path).split(/[\\/]/).pop() || String(path);
+  if (!/\.pdf$/i.test(name)) { toast(t('toast.pdfOnly'), true); return; }
+  // 有真实路径：读盘打开，filePath 记下来，之后保存直接覆盖这个文件
+  const res = await bridge.readFile(String(path));
+  if (fail(res)) return;
+  await loadBytes(new Uint8Array(res.file.data), res.file.path, res.file.name, 'disk');
+};
+
+
 
 /* ---------------- 工具与自检钩子 ---------------- */
 

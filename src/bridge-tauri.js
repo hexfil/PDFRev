@@ -98,11 +98,34 @@
 
   api.info = async (data) => call('pdf_info', { args: { data: u8ToB64(data) } });
 
+  /**
+   * 把参数里的二进制转成 base64。
+   *
+   * 为什么必须做：Tauri 的 IPC 走 JSON.stringify，`Uint8Array` 会被序列化成
+   * `{"0":1,"1":2,...}` 这种「下标当键」的对象，Rust 侧按字符串取就取不到。
+   * 于是「插入另一个 PDF」时 `params.data` 拿不到 → 回落去读 pdfPath（空串）
+   * → abs_path("") 变成当前工作目录 → 报「目标目录不存在 F:\PDFRev_Tauri」。
+   * 顶层的 data 一直有 u8ToB64，嵌套在 params 里的这份之前漏了。
+   */
+  function ipcSafe(v) {
+    if (v == null) return v;
+    if (v instanceof Uint8Array || ArrayBuffer.isView(v)) return u8ToB64(v);
+    if (v instanceof ArrayBuffer) return u8ToB64(new Uint8Array(v));
+    if (Array.isArray(v)) return v.map(ipcSafe);
+    if (typeof v === 'object') {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = ipcSafe(v[k]);
+      return out;
+    }
+    return v;
+  }
+
   api.op = async (op, data, args) => {
-    // Rust 侧 pdf_op 的签名是 fn pdf_op(args: OpArgs)，OpArgs 里才有 op/data/args
+    // Rust 侧 pdf_op 的签名是 fn pdf_op(args: OpArgs)，OpArgs 里才有 op/data/params
     // 三个字段，所以这里必须整包放进 `args` 键（Tauri 的参数名要和形参名一致）。
+    // params 里可能带二进制（插入 PDF 的 data），过 IPC 前统一换成 base64。
     const r = await call('pdf_op', {
-      args: { op: String(op), data: u8ToB64(data), params: args || {} },
+      args: { op: String(op), data: u8ToB64(data), params: ipcSafe(args || {}) },
     });
     if (r && r.ok === false) return r;
     // 结果同样以 Uint8Array 交回给界面

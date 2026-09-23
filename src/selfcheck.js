@@ -427,6 +427,45 @@
       for (let i = 0; i < 40; i++) { const b = curBytes(); if (b) { seq4 = await pageSeq(b); break; } await wait(200); }
       put('旋转不改变页序', seq4.join(',') === '1,2,4,5', seq4.join(','));
 
+      /* ---------- 11.5 插入位置下拉必须随页数重建 ----------
+         删页之后如果不重建，下拉里会留着已经不存在的页码（比如删掉第 3 页后
+         仍有「第 3 页之前/之后」），选中它插入就会定位错误或直接失败。
+         这里断言：选项覆盖到「最后一页之后」，且没有任何超出当前页数的项。 */
+      const atSel = $('insertAt');
+      const atVals = [...atSel.options].map((o) => o.value);
+      put('插入位置下拉含「最后一页之后」',
+        atVals.includes('after:' + window.__state.total), atVals.slice(-6).join(','));
+      const atBad = atVals.filter((v) => {
+        const m = /^(?:before|after):(\d+)$/.exec(v);
+        return m && Number(m[1]) > window.__state.total;
+      });
+      put('插入位置下拉无越界页码（删页后已重建）', atBad.length === 0, atBad.join(','));
+
+      /* ---------- 11.6 插入另一个 PDF（走内存 data，不能回落去读磁盘路径） ----------
+         曾经的 bug：params.data（Uint8Array）过 Tauri IPC 被 JSON.stringify 成
+         {"0":1,...}，Rust 侧按字符串取不到 → 回落读空的 pdfPath → 报
+         「目标目录不存在 F:\PDFRev_Tauri」。这里用内置 fixture 真插一次。 */
+      const insBytes = await fixture('p2.pdf');
+      const beforeIns = await window.api.info(curBytes());
+      const insRes = await window.api.op('insert', curBytes(), {
+        data: insBytes, at: 'after:' + beforeIns.info.pages,
+      });
+      put('插入 PDF（内存 data）成功，未回落读磁盘路径',
+        insRes && insRes.ok !== false, insRes && (insRes.error || 'ok'));
+      if (insRes && insRes.ok !== false) {
+        const afterIns = await window.api.info(insRes.data);
+        put('插入后页数 = 原页数 + 2', afterIns.info.pages === beforeIns.info.pages + 2,
+          beforeIns.info.pages + ' -> ' + afterIns.info.pages);
+      }
+      /* 不把插入结果写回 state：后续第 12 步要按 4 页断言 */
+
+      /* 空 data + 空 pdfPath 必须明确报错（而不是报当前工作目录） */
+      const noSrc = await window.api.op('insert', curBytes(), { at: 'tail' });
+      put('插入缺源文件时报「请先选择要插入的 PDF」而不是目录不存在',
+        noSrc && noSrc.ok === false && (noSrc.ekey === 'pdf.noInsertSource' ||
+          !/目录不存在|does not exist/i.test(String(noSrc.error))),
+        noSrc ? JSON.stringify({ code: noSrc.code, ekey: noSrc.ekey, error: noSrc.error }) : '');
+
       /* ---------- 12. 保存落盘（原子写 + 真的写成功） ---------- */
       const sv = await window.api.save(p5, curBytes(), true);
       put('IPC save 落盘成功', sv && sv.ok !== false, JSON.stringify(sv && (sv.error || sv.path)));
@@ -444,8 +483,34 @@
       const cp = await window.api.copyText('PDFRev 剪贴板自检');
       put('IPC 写剪贴板成功', cp && cp.ok !== false, JSON.stringify(cp && cp.error));
 
-      /* ---------- 15. 只读文件保存要提示（READONLY 分支） ---------- */
-      put('桥接层不返回磁盘路径（拖入走内存打开分支）', window.api.getFilePath() === '');
+      /* ---------- 15. 保存 = 直接覆盖；拖入文件走原生拖放拿真实路径 ----------
+         用户要求「保存 / Ctrl+S 直接覆盖原文件，不弹询问框」。这里断言：
+           a) 保存到已有路径会原地覆盖（页数变了但路径不变）；
+           b) 只读文件也能覆盖成功（不再需要用户确认，自动清只读）；
+           c) 前端已接上原生拖放钩子（拖入带真实路径 -> filePath 有值 -> 保存直接覆盖）。 */
+      const sv2 = await window.api.save(p5, curBytes(), false);
+      put('保存到已有路径＝原地覆盖（不另存）',
+        sv2 && sv2.ok !== false && String(sv2.path).toLowerCase() === p5.toLowerCase(),
+        JSON.stringify(sv2 && (sv2.error || sv2.path)));
+
+      // 把文件设成只读，再存一次：应当自动解除并成功覆盖
+      let roOk = false;
+      try {
+        const rd = await window.__TAURI__.core.invoke('selfcheck_set_readonly', { path: p5, on: true });
+        roOk = !!(rd && rd.ok !== false);
+      } catch (err) { roOk = false; }
+      if (roOk) {
+        const sv3 = await window.api.save(p5, curBytes(), true);
+        put('只读文件也能直接覆盖（自动清只读，不弹询问）',
+          sv3 && sv3.ok !== false,
+          JSON.stringify(sv3 && { error: sv3.error, cleared: sv3.clearedReadonly }));
+      } else {
+        put('只读文件也能直接覆盖（自动清只读，不弹询问）', true, '（本环境无法设置只读，跳过）');
+      }
+
+      put('前端已接原生拖放钩子（拖入可拿到真实路径）',
+        typeof window.__pdfrevDropPath === 'function' &&
+        typeof window.__pdfrevDragHover === 'function');
 
       /* ---------- 16. 真实文档 test/VPEg.pdf（62 页 / 10.3 MB） ---------- */
       const vpath = 'F:\\PDFRev\\test\\VPEg.pdf';

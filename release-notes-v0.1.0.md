@@ -58,4 +58,4 @@ sha256  380DBE8E20C1FBC59354535B94EC6AF8DDE06DC4E9D17C269CCDA433550C8B23
 
 ## 许可
 
-MIT。见 [LICENSE](https://github.com/woxii88/PDFRev/blob/master/LICENSE)。
+MIT。见 [LICENSE](https://github.com/He-XF/PDFRev/blob/master/LICENSE)。

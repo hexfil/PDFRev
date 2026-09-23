@@ -1,6 +1,6 @@
 # PDFRev_Tauri — PDFRev 的 Tauri 2 重写版
 
-> 当前版本：**v0.12.0**（发布物见 [Releases](https://github.com/woxii88/PDFRev/releases)）
+> 当前版本：**v0.12.0**（发布物见 [Releases](https://github.com/He-XF/PDFRev/releases)）
 
 用 **Tauri 2（Rust + WebView2）** 重写已完成的 PDFRev 桌面版，功能一一对应。
 前端界面逻辑直接复用原版（`src/app.js` 一行未改），后端换成 Rust。
@@ -21,7 +21,7 @@
 
 | 功能 | 实现位置 |
 |---|---|
-| 打开 PDF（按钮 / 拖入窗口） | `open_pdf` / 拖入走内存打开 |
+| 打开 PDF（按钮 / 拖入窗口） | `open_pdf` / 拖入走原生拖放拿真实路径（见 handoff 5.28） |
 | 缩略图渲染、勾选 | 前端（PDF.js），与原版相同 |
 | 删除单页 / 多页 / 范围表达式 | `pdf_op { op: "delete" }` |
 | 拖动缩略图排序 / 输入顺序 | `pdf_op { op: "reorder" }` |
@@ -39,7 +39,7 @@
 | 版权与许可页（首次自动弹） | 前端，与原版同源 |
 | 多语言界面（简中 / 英文）+ 顶栏语言选择框 | src/i18n.js，界面全部菜单/按钮/提示随语言切换 |
 | 英文标题 | PDF Revisor（窗口标题随语言切换） |
-| 版权页版本号 + GitHub 链接 | 版本号取自 `Cargo.toml`（界面不手写），链接点一下用系统浏览器打开 |
+| 保存 | 原地覆盖原文件；只读文件自动清只读后覆盖（不弹询问）。换位置用【另存为】 |
 | `PDFRev.exe --version` / `--help` | 命令行打印版本号 / 用法并退出，版本号与界面同源 |
 
 ## 启动
@@ -67,7 +67,7 @@ dist\LICENSE                        MIT 许可原文，随包分发
 ```
 
 **单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
-（已实测：把 exe 单独放进空目录，96 项自检全部通过。）
+（已实测：把 exe 单独放进空目录，103 项自检全部通过。）
 
 ## 测试
 
@@ -91,7 +91,7 @@ cargo run --example vpeg_check
 会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
 并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
 
-### 3. 界面端到端自检（96 项，真实 WebView2）
+### 3. 界面端到端自检（103 项，真实 WebView2）
 
 ```powershell
 cd F:\PDFRev_Tauri
@@ -114,7 +114,7 @@ src/                        前端（与原版共享界面逻辑）
   i18n.js                   ★ 多语言词典与切换逻辑（界面文案唯一来源）
   style.css                 样式
   bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
-  selfcheck.js              界面端到端自检（--selfcheck 时跑，96 项）
+  selfcheck.js              界面端到端自检（--selfcheck 时跑，103 项）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）
@@ -155,9 +155,11 @@ pdfrev_logo.png             设计原图（logo，1536x1024）
 两处必然差异在这一层吸收掉：
 
 - **二进制过 IPC**：Tauri 传 base64 最稳，桥接层在两端做 base64 ↔ Uint8Array 转换；
-- **拖入文件的磁盘路径**：Tauri 的 webview 拿不到（Electron 靠 `webUtils`），
-  返回空串，于是走 `app.js` 里已有的「内存打开、保存时再选位置」分支 ——
-  这正好就是需求要的「拖入不另存，直接打开」。
+- **拖入文件的磁盘路径**：HTML5 拖放在 Tauri 里拿不到路径，改用**原生拖放**
+  （`dragDropEnabled: true` + Rust 侧 `WindowEvent::DragDrop`）把真实路径 eval
+  给前端，于是拖入后 Ctrl+S 能像桌面版一样直接覆盖原文件。
+  代价：Windows 上原生拖放与 HTML5 拖放互斥，缩略图排序已改用 pointer 事件。
+  详见 handoff 5.28。
 
 ### 2. 错误必须归一化成 `{ok:false}`
 

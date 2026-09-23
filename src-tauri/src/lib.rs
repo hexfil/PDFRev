@@ -188,6 +188,28 @@ struct SaveResult {
 /// 安全写入（对应 writeFileSafe）：
 ///   · 先写同目录临时文件再改名覆盖，避免写一半失败把原文件截断；
 ///   · 目标带只读属性时默认拒绝并给 READONLY，用户确认后再 unlock 覆盖。
+/// 清掉目标的只读属性，返回「这次真的清过吗」。
+///
+/// 单独抽出来是因为改名覆盖失败时要再兜一次：`is_readonly` 走的是
+/// `Permissions::readonly()`（Windows 上就是 FILE_ATTRIBUTE_READONLY），
+/// 网络盘 / 特殊 ACL 下可能漏判，而漏判的后果是直接报「没有权限」。
+fn clear_readonly(abs: &Path) -> std::io::Result<bool> {
+    if !is_readonly(abs) {
+        return Ok(false);
+    }
+    let m = match fs::metadata(abs) {
+        Ok(m) => m,
+        // 目标不存在就没什么可清的（新建文件的情形）
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let mut perm = m.permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perm.set_readonly(false);
+    fs::set_permissions(abs, perm)?;
+    Ok(true)
+}
+
 fn write_file_safe(abs: &Path, data: &[u8], unlock: bool) -> Result<SaveResult, ErrPayload> {
     let mut cleared = false;
     if is_readonly(abs) {
@@ -199,17 +221,8 @@ fn write_file_safe(abs: &Path, data: &[u8], unlock: bool) -> Result<SaveResult, 
                 &format!("the file is read-only and cannot be overwritten: {}. Clear the read-only flag and overwrite?", abs.display()),
             );
         }
-        match fs::metadata(abs) {
-            Ok(m) => {
-                let mut perm = m.permissions();
-                #[allow(clippy::permissions_set_readonly_false)]
-                perm.set_readonly(false);
-                if let Err(e) = fs::set_permissions(abs, perm) {
-                    let (c, k, a, m) = explain_io(&e, abs, false);
-                    return io_err(&c, &k, a, &m);
-                }
-                cleared = true;
-            }
+        match clear_readonly(abs) {
+            Ok(v) => cleared = v,
             Err(e) => {
                 let (c, k, a, m) = explain_io(&e, abs, false);
                 return io_err(&c, &k, a, &m);
@@ -229,8 +242,47 @@ fn write_file_safe(abs: &Path, data: &[u8], unlock: bool) -> Result<SaveResult, 
         let (c, k, a, m) = explain_io(&e, abs, false);
         return io_err(&c, &k, a, &m);
     }
-    if let Err(e) = fs::rename(&tmp, abs) {
+
+    // 改名覆盖（原子写）。Windows 上这一步除了「目录不可写」之外还有两种
+    // 常见的 ACCESS_DENIED，都不是我们能在写入前判断出来的：
+    //   1. 目标带只读属性（MoveFileEx 直接拒绝，已经过实测确认）；
+    //   2. 目标正被别的程序拿着句柄（阅读器 / 网盘同步 / 杀软在扫）。
+    // 所以这里不赌判定，直接做两级自愈：先再清一次只读，再稍等重试。
+    // 用户报的「插入另一个 PDF 后保存提示没有权限」就是撞在 (1)/(2) 上。
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0u64..3 {
+        match fs::rename(&tmp, abs) {
+            Ok(_) => {
+                last = None;
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                if attempt == 0 {
+                    if let Ok(true) = clear_readonly(abs) {
+                        cleared = true;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(150 * (attempt + 1)));
+                last = Some(e);
+            }
+            Err(e) => {
+                last = Some(e);
+                break;
+            }
+        }
+    }
+    if let Some(e) = last {
         let _ = fs::remove_file(&tmp);
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            // 清过只读、也等过重试仍然拒绝：多半是文件被占用，或目录本身不给写。
+            // 报成「没有权限」会把人引到错的方向，这里给一条能照着做的提示。
+            return err_keyed(
+                "ELOCKED",
+                "io.locked",
+                serde_json::json!({ "path": abs.display().to_string() }),
+                &format!("could not overwrite {}: the file may be open in another program, or the folder does not allow writing", abs.display()),
+            );
+        }
         let (c, k, a, m) = explain_io(&e, abs, false);
         return io_err(&c, &k, a, &m);
     }

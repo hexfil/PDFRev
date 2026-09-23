@@ -29,10 +29,10 @@
 | 旋转 90 / 180 / 270 | `pdf_op { op: "rotate" }` |
 | 插入另一个 PDF（首页/尾页/第 N 页前后） | `pdf_op { op: "insert" }` |
 | 反转全部页序、撤销 | 前端 + `pdf_op` |
-| 双击预览、预览内 Delete 删页 | 前端（与原版相同） |
+| 双击预览、预览内 Delete 删页、Home/End 跳页 | 前端（与原版相同） |
 | 预览滚轮缩放（以光标为中心） | 前端 |
 | 顶栏完整路径 + 创建/修改时间 | `file:stat` → `stat` |
-| 只读文件保存前询问 | `save` 返回 `READONLY`，确认后 `unlock` |
+| 只读文件直接覆盖 | 自动清只读；改名被拒时再清一次 + 重试，仍失败报 `io.locked`（文件可能被占用） |
 | 原子保存（临时文件 + 改名） | `write_file_safe` |
 | 另存为 / 选择保存位置 | `save_as` / `pick_save_path` |
 | 等价命令行 / JSON 展示与复制 | 前端 + `copy_text` |
@@ -67,7 +67,7 @@ dist\LICENSE                        MIT 许可原文，随包分发
 ```
 
 **单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
-（已实测：把 exe 单独放进空目录，103 项自检全部通过。）
+（已实测：把 exe 单独放进空目录，109 项自检全部通过。）
 
 ## 测试
 
@@ -91,7 +91,7 @@ cargo run --example vpeg_check
 会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
 并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
 
-### 3. 界面端到端自检（103 项，真实 WebView2）
+### 3. 界面端到端自检（109 项，真实 WebView2）
 
 ```powershell
 cd F:\PDFRev_Tauri
@@ -99,7 +99,8 @@ powershell -ExecutionPolicy Bypass -File tools\selfcheck.ps1
 ```
 
 在真实窗口里跑完整链路：版权页 → 打开 PDF → 缩略图 → 顶栏信息 → 双击预览
-→ 滚轮缩放 → 预览内 Delete 删页 → 排序 → 撤销 → 旋转 → 保存落盘 → stat
+→ Home/End 跳页 → 滚轮缩放 → 预览内 Delete 删页 → 排序 → 撤销 → 旋转 → 保存落盘
+→ 只读原文件上插入 + 保存 → stat
 → 剪贴板 → 真实文档 62 页渲染 → 国际化（切语言 / 文案 / 后端错误本地化）→ 无未捕获错误。
 
 报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`（WebView2 是 GUI 进程，
@@ -114,7 +115,7 @@ src/                        前端（与原版共享界面逻辑）
   i18n.js                   ★ 多语言词典与切换逻辑（界面文案唯一来源）
   style.css                 样式
   bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
-  selfcheck.js              界面端到端自检（--selfcheck 时跑，103 项）
+  selfcheck.js              界面端到端自检（--selfcheck 时跑，109 项）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）

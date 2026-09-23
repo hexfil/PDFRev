@@ -3,7 +3,7 @@
 > 给下一次继续写代码的会话看。读完这份就能直接上手，不需要重新摸索。
 > 最后更新：2026-09-21（v0.12.0：国际化 + 英文标题 PDF Revisor + 版权页版本号/主页链接 + `--version`）
 >
-> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 103 项，全部通过。
+> 测试基线：Rust 单元 14 项 + 真实文档端到端 1 套 + 界面自检 109 项，全部通过。
 
 ---
 
@@ -304,6 +304,62 @@ return head + '\n\n' + b + '\n';         // 正文 + 恰好一个空行 + 块
   - 保存到已有路径＝原地覆盖（路径不变）
   - 只读文件也能直接覆盖（`selfcheck_set_readonly` 先设只读再存）
   - 前端已接原生拖放钩子
+### 5.29 预览 Home/End 跳页；只读原文件保存不再报「没有权限」
+
+**用户要求**：① 预览时 `Home` 跳第一页、`End` 跳最末页；② 修「插入另一个 PDF
+文件后，保存提示没有权限」。
+
+**① Home/End**：`src/app.js` 预览分支里补两条（`src/app.js:793` 附近），
+总页数从 `pv.doc` 取，`pv.doc` 还没加载出来时交给 `showPreviewPage` 内部
+去 `getDocument` 并夹取范围（所以 `Home` 传 1、`End` 传 `pv.doc ? pv.doc.numPages : 1`）：
+
+```js
+if (e.key === 'Home') { e.preventDefault(); showPreviewPage(1); return; }
+if (e.key === 'End')  { e.preventDefault(); showPreviewPage(pv.doc ? pv.doc.numPages : 1); return; }
+```
+
+注意**不要**用 `$('pvPrev').click()`：按钮在只剩一页时是 `disabled`，
+`click()` 不触发（同一个坑上一轮在 Delete 上已经踩过，见该处注释）。
+预览底栏提示文案（i18n 的 `pv.foot`）同步加了「Home/End 首页/末页」。
+
+**② 「没有权限」真正的来源**：临时文件 + `fs::rename` 的**原子写**在
+Windows 上遇到两种 `ACCESS_DENIED`，都是写入前判断不出来的：
+
+| 情形 | 表现 | 为什么漏判 |
+|---|---|---|
+| 目标带只读属性（`attrib` 显示 `R`） | `rename(tmp, target)` 直接 `os error 5` | `Permissions::readonly()` 在部分 ACL / 网络盘下漏判 |
+| 目标正被别的程序占着句柄（阅读器 / 网盘同步 / 杀软扫描） | 同样 `os error 5` | 无法预判，只能试 |
+
+实测（`%TEMP%\pdfrev-probe2`，可复跑）：先在只读文件上 `set_readonly(false)`
+再 `rename` → 成功；直接 `rename` → `PermissionDenied`。用户手上的
+`F:\PDFRev\test\VPEg.pdf` 就是 `A R`（微信 / 网盘另存出来的 PDF 基本都是），
+所以「插入 → Ctrl+S」正好撞在这条路上。
+
+**修法**（`src-tauri/src/lib.rs` 的 `write_file_safe`）：
+1. 抽出 `clear_readonly()`（顺手把「目标不存在」当成「没什么可清」返回
+   `Ok(false)`，新建文件时不再白跑一趟 metadata 错误分支）；
+2. `rename` **失败后不放弃**，做两级自愈后再判死：
+   先**再清一次只读**（补上漏判），再 `150/300ms` 退避**重试两次**；
+3. 重试仍 `PermissionDenied` 时报 `ELOCKED` / `io.locked`，文案明确说
+   「文件可能正被其他程序打开，或所在文件夹不允许写入」——
+   继续报 `io.eacces`（「没有写入权限」）会把人往权限/目录方向带偏。
+
+**没有牺牲原子写**：仍然是「同目录临时文件 → 改名覆盖」，
+只在改名失败时补一次清只读 + 重试，写入中断不会毁原文件（见 5.14）。
+
+**自检新增 6 项**（103 → 109）：
+  - 预览内 Home 跳到第一页
+  - 预览内 End 跳到最末页
+  - 预览回到第 3 页（后续「预览内 Delete 删页」的前提，删页断言不能被动摇）
+  - 只读原文件上插入另一个 PDF（走 IPC）
+  - **插入另一个 PDF 后保存到只读原文件（不再报没有权限）** —— 断言磁盘上
+    真的是 7 页，不是弹个错误提示就完事
+  - 首次覆盖后只读属性已清除（再来一次 `unlock=false` 的保存应当直接成功、
+    `clearedReadonly === false`）
+
+自检里这段刻意走**界面按钮**（`$('btnSave').click()`）而不是直接调
+`window.api.save`，因为用户的抱怨就是「按保存之后弹没有权限」；
+只测 IPC 层会漏掉 `saveToPath` 里 `READONLY -> unlock 重存` 那段逻辑。
 ### 5.27 仓库改名为 PDFRev（去掉 Tauri 后缀；用户名后改为 He-XF）
 
 用户要求 GitHub 上只叫 PDFRev。做的事：
@@ -488,14 +544,14 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 
     & "$env:USERPROFILE\.cargo\bin\cargo.exe" run --release --example vpeg_check
 
-### 6.3 界面端到端自检（103 项，跑在真实 WebView2 里）
+### 6.3 界面端到端自检（109 项，跑在真实 WebView2 里）
 
 `src/selfcheck.js`。exe 带 `--selfcheck` 启动时，`selfcheck_enabled` 返回 true，前端加载完自动跑。
 
 **为什么用轮询文件**：WebView2 是 GUI 进程，终端拿不到它的 stdout，
 只能把报告写到 `%TEMP%\pdfrev-tauri-selfcheck.txt`，外部脚本轮询文件里出现「自检完成」标记。
 
-覆盖清单（103 项）：
+覆盖清单（109 项）：
 | 组 | 项数 | 覆盖内容 |
 |---|---|---|
 | 版权页 | 23 | 存在、工具栏按钮、首次弹出、四条条款齐全、版权行含版权方与邮箱、条款无重复编号、条款标题完整、标题为 MIT、声明以 MIT 发布、折叠区含全文、全文含五个要点段落、logo 已加载、logo 尺寸合理、文案与 i18n 词典一致、可关闭、显示版本号（取自 Rust）、版本号与 Rust 一致、不等于 0.1.0、含 GitHub 链接、链接文本含主机名、桥接层三个新方法、openUrl 拒绝 file:// |
@@ -505,9 +561,9 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | IPC | 3 | read_file、返回 Uint8Array、pdf_info 页数 |
 | 缩略图 | 2 | 打开后渲染 5 个缩略图、canvas 有内容像素（PDF.js 可用） |
 | 顶栏信息 | 3 | 文件名/页数/大小、完整磁盘路径、创建与修改时间 |
-| 预览 | 5 | 双击打开、停在正确页、滚轮放大、滚轮缩小、Delete 删当前页 |
+| 预览 | 8 | 双击打开、停在正确页、**Home 跳第一页**、**End 跳最末页**、回到指定页、滚轮放大、滚轮缩小、Delete 删当前页 |
 | 页面操作 | 8 | 删除后页序正确、关闭预览后缩略图数、排序生效、撤销排序、旋转后可解析、旋转不改页序、插入位置下拉含「最后一页之后」、下拉无越界页码（删页后重建） |
-| 保存 | 6 | save 落盘、磁盘文件页数、stat 返回时间、原地覆盖（不另存）、只读文件直接覆盖（自动清只读）、前端已接原生拖放钩子 |
+| 保存 | 9 | save 落盘、磁盘文件页数、stat 返回时间、原地覆盖（不另存）、只读文件直接覆盖（自动清只读）、前端已接原生拖放钩子、**只读原文件上插入另一个 PDF**、**插入后保存到只读原文件不再报没有权限**、**首次覆盖后只读属性已清除** |
 | 剪贴板与插入 | 3 | 写剪贴板、插入 PDF（内存 data）成功且页数 +N、插入缺源文件报 pdf.noInsertSource（而不是「目录不存在」） |
 | 真实文档 | 6 | 打开 VPEg.pdf、报 62 页、中文标题 UTF-16BE 正确解码、渲染 62 缩略图、缩略图有内容、删除第 1 页 |
 | 稳定性 | 3 | 可重开帮助面板、窗口置前、渲染进程无未捕获错误 |
@@ -597,16 +653,18 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | Rust 单元测试 | 14 项通过，0 失败 |
 | 真实文档端到端 | 通过（62 页；删 / 抽 / 转 / 插 / 排序均正确） |
 | 源文件完整性 | VPEg.pdf sha256 32045FD8F1ACFD7C 未变 |
-| 界面自检 | 103 项通过，0 失败（真实 WebView2） |
-| 发布物 | dist\PDFRev.exe 4,717,056 字节（4.50 MB），版本号 0.12.0 |
+| 界面自检 | 109 项通过，0 失败（真实 WebView2） |
+| 发布物 | dist\PDFRev.exe 4,719,104 字节（4.50 MB），版本号 0.12.0 |
 | 便携性 | 单独放空目录仍全绿，无需额外 dll |
 | 体积对比 | Electron 便携版解压 233 MB -> Tauri 4.49 MB（1.93%） |
 | 界面截图 | test\tauri-ui.png（2404x1639）、test\copyright.png（版权页，含 logo） |
 | 应用图标 | exe 内嵌图标已换：32x32 抽样 69.7% 红色、真透明、无棋盘残留 |
 | 版权页 | MIT 许可：无重复编号；含 logo（720x269）；含可展开的许可全文 |
 | 多语言 | 界面全量支持简中 / 英文，顶栏语言选择框，后端错误也按语言渲染，窗口标题同步（20 项断言） |
+| 预览快捷键 | Home / End 跳第一页 / 最末页（与 ← → 、PageUp/PageDown、Delete、Esc 并存） |
+| 只读原文件保存 | 插入另一个 PDF 后 Ctrl+S 覆盖只读原文件成功（自动清只读；再失败则报「文件可能被占用」而不是「没有权限」） |
 | 版本号与主页 | 版权页显示 PDFRev 0.12.0 与可点击 GitHub 链接；`PDFRev.exe --version` / -V 打印版本号并返回 0 |
-| 校验值 | sha256 591D5D88BEDF337D503FA120BDDCDAF7A1E006810726B96073894A9733F79A48 |
+| 校验值 | sha256 DEB55357BFB5D36A0F6CBA3FF6702FA9AA97E2553ECE8CBFA83B4A32B4A51704（2026-09-23 补丁构建） |
 
 ---
 

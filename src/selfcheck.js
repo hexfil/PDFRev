@@ -354,6 +354,26 @@
       put('预览停在第 3 页', $('pvTitle').textContent.indexOf('第 3 页') >= 0,
         $('pvTitle').textContent);
 
+      /* ---------- 5b. 预览内 Home / End 跳页 ---------- */
+      const pressKey = (key) => document.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      pressKey('Home');
+      for (let i = 0; i < 40; i++) { await wait(200); if (/第 1 页 \/ 共/.test($('pvTitle').textContent)) break; }
+      put('预览内 Home 跳到第一页', /第 1 页 \/ 共 5 页/.test($('pvTitle').textContent),
+        $('pvTitle').textContent);
+      pressKey('End');
+      for (let i = 0; i < 40; i++) { await wait(200); if (/第 5 页 \/ 共/.test($('pvTitle').textContent)) break; }
+      put('预览内 End 跳到最末页', /第 5 页 \/ 共 5 页/.test($('pvTitle').textContent),
+        $('pvTitle').textContent);
+      // 回到第 3 页，保持后续步骤（Delete 删第 3 页）的前提不变
+      pressKey('Home');
+      for (let i = 0; i < 40; i++) { await wait(200); if (/第 1 页 \/ 共/.test($('pvTitle').textContent)) break; }
+      $('pvNext').click(); await wait(600);
+      $('pvNext').click();
+      for (let i = 0; i < 40; i++) { await wait(200); if (/第 3 页 \/ 共/.test($('pvTitle').textContent)) break; }
+      put('预览回到第 3 页（后续删页前提）', /第 3 页 \/ 共 5 页/.test($('pvTitle').textContent),
+        $('pvTitle').textContent);
+
       /* ---------- 6. 滚轮缩放 ---------- */
       // 直接构造 WheelEvent 派发。不要用 new Function / eval 拼脚本：
       // Tauri 的 CSP 不含 unsafe-eval，会被拦下（踩过）。
@@ -511,6 +531,49 @@
       put('前端已接原生拖放钩子（拖入可拿到真实路径）',
         typeof window.__pdfrevDropPath === 'function' &&
         typeof window.__pdfrevDragHover === 'function');
+
+      /* ---------- 15b. 用户报的「插入另一个 PDF 后保存提示没有权限」 ----------
+         场景还原：原文件带只读属性（用户手上的 VPEg.pdf 就是 A+R，微信/网盘
+         另存出来的 PDF 基本都是），插入另一个 PDF 后按 Ctrl+S 覆盖原文件。
+         这里用「界面按钮」走完整链路（btnSave -> saveToPath -> IPC），
+         断言磁盘上的文件真的被改成了 7 页，而不是弹一个错误提示。 */
+      {
+        const dir = p5.replace(/\\[^\\]+$/, '');
+        const roPath = dir + '\\selfcheck-ro.pdf';
+        await window.api.save(roPath, five, true);
+        await window.__TAURI__.core.invoke('selfcheck_set_readonly', { path: roPath, on: true });
+
+        const roBack = await window.api.readFile(roPath);
+        await loadBytes(new Uint8Array(roBack.file.data), roPath, 'selfcheck-ro.pdf');
+        for (let i = 0; i < 40; i++) { await wait(200); if (window.__state.total === 5) break; }
+
+        const two = await fixture('p2.pdf');
+        const ins = await window.api.op('insert', curBytes(), { data: two, at: 'tail' });
+        put('只读原文件上插入另一个 PDF（走 IPC）',
+          ins && ins.ok !== false, JSON.stringify(ins && ins.error));
+        window.__state.bytes = new Uint8Array(ins.data);
+        window.__state.total = 7;
+
+        // 真的按保存按钮：这一步内部会先拿 READONLY、再自动清只读重存
+        $('btnSave').click();
+        let savedPages = 0;
+        for (let i = 0; i < 60; i++) {
+          await wait(300);
+          const disk = await window.api.readFile(roPath);
+          if (disk && disk.ok !== false) {
+            const di = await window.api.info(disk.file.data);
+            if (di && di.ok !== false) { savedPages = di.info.pages; if (savedPages === 7) break; }
+          }
+        }
+        put('插入另一个 PDF 后保存到只读原文件（不再报没有权限）', savedPages === 7,
+          '磁盘上 ' + savedPages + ' 页');
+
+        // 只读属性应当已经被自动清掉：再来一次 unlock=false 的保存就应直接成功
+        const again = await window.api.save(roPath, curBytes(), false);
+        put('首次覆盖后只读属性已清除（后续保存无需再解锁）',
+          again && again.ok !== false && again.clearedReadonly === false,
+          JSON.stringify(again && (again.error || { cleared: again.clearedReadonly })));
+      }
 
       /* ---------- 16. 真实文档 test/VPEg.pdf（62 页 / 10.3 MB） ---------- */
       const vpath = 'F:\\PDFRev\\test\\VPEg.pdf';

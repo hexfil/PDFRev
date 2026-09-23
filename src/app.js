@@ -790,6 +790,9 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.preventDefault(); closePreview(); return; }
     if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); $('pvPrev').click(); return; }
     if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); $('pvNext').click(); return; }
+    // Home/End：跳到第一页 / 最末页（pv.doc 可能尚未就绪，交给 showPreviewPage 内部加载并夹取范围）
+    if (e.key === 'Home') { e.preventDefault(); showPreviewPage(1); return; }
+    if (e.key === 'End') { e.preventDefault(); showPreviewPage(pv.doc ? pv.doc.numPages : 1); return; }
     return;
   }
 

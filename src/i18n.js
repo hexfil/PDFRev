@@ -119,7 +119,7 @@ const I18N_ZH = {
   'pv.delete': '删除此页 (Delete)',
   'pv.close': '关闭 (Esc)',
   'pv.loading': '渲染中…',
-  'pv.foot': '滚轮缩放（或 Ctrl+滚轮）· 双击空白关闭 · Delete 删除本页 · ← → 翻页 · Esc 关闭',
+  'pv.foot': '滚轮缩放（或 Ctrl+滚轮）· 双击空白关闭 · Delete 删除本页 · ← → 翻页 · Home/End 首页/末页 · Esc 关闭',
 
   'ch.title': 'pdfrev 命令行帮助',
   'ch.close': '关闭 (Esc)',
@@ -288,7 +288,7 @@ const I18N_EN = {
   'pv.delete': 'Delete this page (Delete)',
   'pv.close': 'Close (Esc)',
   'pv.loading': 'Rendering…',
-  'pv.foot': 'Wheel to zoom (or Ctrl+wheel) · double-click empty area to close · Delete removes this page · ← → to flip · Esc to close',
+  'pv.foot': 'Wheel to zoom (or Ctrl+wheel) · double-click empty area to close · Delete removes this page · Home/End first/last page · ← → to flip · Esc to close',
 
   'ch.title': 'pdfrev command-line help',
   'ch.close': 'Close (Esc)',
@@ -366,6 +366,7 @@ const I18N_EN = {
 const I18N_ERR = {
   zh: {
     'io.eacces': '没有写入权限，无法{act} {path}。若是系统保护目录，请改用「另存为」保存到文档或桌面。',
+    'io.locked': '无法覆盖 {path}：文件可能正被其他程序打开，或所在文件夹不允许写入。请关闭占用它的程序后重试，或改用「另存为」。',
     'io.enotfound': '目标目录不存在：{dir}',
     'io.enotdir': '保存路径不合法（上级路径不是文件夹）：{path}',
     'io.enospc': '磁盘空间不足，无法保存。',
@@ -408,6 +409,7 @@ const I18N_ERR = {
   },
   en: {
     'io.eacces': 'No write permission, cannot {act} {path}. If this is a protected system folder, use "Save As" to save to Documents or Desktop.',
+    'io.locked': 'Could not overwrite {path}: the file may be open in another program, or the folder does not allow writing. Close the program using it and retry, or use the Save As command.',
     'io.enotfound': 'Target directory does not exist: {dir}',
     'io.enotdir': 'Invalid save path (a parent path is not a folder): {path}',
     'io.enospc': 'Not enough disk space to save.',

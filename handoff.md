@@ -360,14 +360,14 @@ Windows 上遇到两种 `ACCESS_DENIED`，都是写入前判断不出来的：
 自检里这段刻意走**界面按钮**（`$('btnSave').click()`）而不是直接调
 `window.api.save`，因为用户的抱怨就是「按保存之后弹没有权限」；
 只测 IPC 层会漏掉 `saveToPath` 里 `READONLY -> unlock 重存` 那段逻辑。
-### 5.27 仓库改名为 PDFRev（去掉 Tauri 后缀；用户名后改为 He-XF）
+### 5.27 仓库改名为 PDFRev（去掉 Tauri 后缀；用户名后改为 hexfil）
 
 用户要求 GitHub 上只叫 PDFRev。做的事：
 
 1. `gh api -X PATCH repos/woxii88/PDFRev_Tauri -f name=PDFRev` —— 改名后
    GitHub 自动把旧地址 301 重定向到新地址（旧 clone 不断，但 `git remote`
    里还留着旧 URL）。
-2. `git remote set-url origin git@github.com:woxii88/PDFRev.git`
+2. `git remote set-url origin git@github.com:hexfil/PDFRev.git`
 3. 代码里的项目主页 URL 同步改：`src-tauri/src/lib.rs` 的 `APP_REPO_URL`、
    `src/index.html` 的 `#crRepo`、README / release-notes 里的链接。
    **改完必须重新 build**（前端资源是编译期嵌入的，见 5.5），
@@ -664,7 +664,7 @@ CSP 只允许 `self`。`open_url` 只放行 `http/https`（自检里有一项断
 | 预览快捷键 | Home / End 跳第一页 / 最末页（与 ← → 、PageUp/PageDown、Delete、Esc 并存） |
 | 只读原文件保存 | 插入另一个 PDF 后 Ctrl+S 覆盖只读原文件成功（自动清只读；再失败则报「文件可能被占用」而不是「没有权限」） |
 | 版本号与主页 | 版权页显示 PDFRev 0.12.0 与可点击 GitHub 链接；`PDFRev.exe --version` / -V 打印版本号并返回 0 |
-| 校验值 | sha256 DEB55357BFB5D36A0F6CBA3FF6702FA9AA97E2553ECE8CBFA83B4A32B4A51704（2026-09-23 补丁构建） |
+| 校验值 | sha256 556246CC722F7A81682B1AF180CD42CC297EAED5DC890D80D977366853F168A5（2026-09-23 补丁构建） |
 
 ---
 

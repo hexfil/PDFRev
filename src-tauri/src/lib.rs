@@ -947,7 +947,7 @@ fn selfcheck_report(text: String, done: bool) -> Result<serde_json::Value, ErrPa
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 项目主页（版权页要显示、也要能点开）
-pub const APP_REPO_URL: &str = "https://github.com/He-XF/PDFRev";
+pub const APP_REPO_URL: &str = "https://github.com/hexfil/PDFRev";
 
 /// 往控制台打一行字。
 ///

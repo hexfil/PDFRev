@@ -71,9 +71,9 @@ PDFRev 的 **Tauri 2 重写版**，界面支持**简体中文 / 英文**（英�
 ```
 PDFRev.exe
 大小  4,719,104 字节（4.50 MB）
-sha256  DEB55357BFB5D36A0F6CBA3FF6702FA9AA97E2553ECE8CBFA83B4A32B4A51704
+sha256  556246CC722F7A81682B1AF180CD42CC297EAED5DC890D80D977366853F168A5
 ```
 
 ## 许可
 
-MIT。见 [LICENSE](https://github.com/He-XF/PDFRev/blob/master/LICENSE)。
+MIT。见 [LICENSE](https://github.com/hexfil/PDFRev/blob/master/LICENSE)。

@@ -308,6 +308,11 @@ pub fn page_count(doc: &Document) -> usize {
 }
 
 /// 当前文档的 1 基页码 -> ObjectId 映射（按页码升序）
+pub fn page_ids(doc: &Document) -> Vec<ObjectId> {
+    pages_sorted(doc)
+}
+
+/// 当前文档的 1 基页码 -> ObjectId 映射（按页码升序）
 fn pages_sorted(doc: &Document) -> Vec<ObjectId> {
     let mut v: Vec<(u32, ObjectId)> = doc.get_pages().into_iter().collect();
     v.sort_by_key(|(n, _)| *n);
@@ -563,7 +568,10 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
     let base_all = range(1, total);
     let mut out = rebuild(&src, &base_all)?;
 
-    // 把插入文档的页面对象拷进 out（新编号），并记录顺序
+    // 把插入文档的页面对象**深拷贝**进 out（重新编号），并记录顺序。
+    //
+    // 这里以前是「按原编号塞进去，编号已被占用就跳过」，是「插入后内容乱码」
+    // 的根因，详见 copy_page_deep 的注释。
     let add_pages = pages_sorted(&ins);
     let mut add_ids: Vec<ObjectId> = Vec::new();
     for n in &pick {
@@ -574,20 +582,7 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
                 json!({ "n": *n, "total": add_pages.len() }),
                 &format!("page {} is out of range (document has {} pages)", n, add_pages.len()),
             ))?;
-        let mut page = ins
-            .get_object(old)
-            .and_then(|o| o.as_dict())
-            .cloned()
-            .map_err(|e| PdfErr::with(
-            "pdf.readInsertPage",
-            json!({ "msg": e.to_string() }),
-            &format!("failed to read a page to insert: {}", e),
-        ))?;
-        // 插入页引用到的资源（字体、图片、内容流）也要一起带过来
-        copy_referenced(&ins, &mut out, &mut page)?;
-        let new_id = out.new_object_id();
-        out.set_object(new_id, Object::Dictionary(page));
-        add_ids.push(new_id);
+        add_ids.push(copy_page_deep(&ins, &mut out, old)?);
     }
 
     // 找到页面树，按位置把新页插进 Kids
@@ -624,6 +619,10 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
     };
     let at = at.min(kids.len());
     for (i, id) in add_ids.iter().enumerate() {
+        // 补上新文档的 Parent：页面树是平的，所有页都挂同一个 Pages 节点
+        if let Ok(d) = out.get_object_mut(*id).and_then(|o| o.as_dict_mut()) {
+            d.set("Parent", Object::Reference(pages_id));
+        }
         kids.insert(at + i, Object::Reference(*id));
     }
 
@@ -635,24 +634,115 @@ pub fn insert_pdf(base: &[u8], add: &[u8], pos: &str, insert_pages: Option<&str>
     to_bytes(out)
 }
 
-/// 把一个页面字典里引用到的对象也复制到目标文档（递归一层，够覆盖常见 PDF）
-fn copy_referenced(src: &Document, dst: &mut Document, page: &mut lopdf::Dictionary) -> Res<()> {
-    let ids: Vec<ObjectId> = page
-        .iter()
-        .filter_map(|(_, v)| v.as_reference().ok())
-        .collect();
-    for id in ids {
-        if let Ok(obj) = src.get_object(id) {
-            let obj = obj.clone();
-            if dst.get_object(id).is_err() {
-                dst.objects.insert(id, obj);
-                if id.0 > dst.max_id {
-                    dst.max_id = id.0;
-                }
-            }
-        }
+/// 深拷贝一页（以及它引用到的全部对象）到目标文档，返回新页的 ObjectId。
+///
+/// **为什么必须重新编号，不能沿用原编号**（「插入另一个 PDF 后内容乱码」的根因）：
+///
+/// 旧实现是「按原编号原样拷进目标文档，编号已被占用就跳过」：
+///     if dst.get_object(id).is_err() { dst.objects.insert(id, obj) }
+/// 两个 PDF 的对象编号是各自独立分配的，几乎必然撞车。以用户的文件为例：
+///   目标 VPEg-测试用.pdf  第 1 页的 `/Contents` 是 6 0 R、`/Resources` 是 7 0 R
+///   待插 1818090690.pdf   第 1 页的 `/Contents` 是 7 0 R、`/Resources` 是 4 0 R
+/// 目标文档里 7 0 R 已经是一个**字体字典**，于是：
+///   · 插入页的 `/Contents -> 7` 被「编号已占用」跳过，实际指向一个字体字典；
+///   · `/Resources` 同理被跳过（或指向别的页的旧资源）。
+/// 解析器拿不到真正的内容流，页就渲染成空白 / 乱码。
+///
+/// 正确做法是给每个被拷贝的对象**分配全新编号**，并同步改写对象内部所有
+/// 指向这些对象的引用（递归，覆盖图片 XObject、字体、内容流、ExtGState 等）。
+///
+/// 自引用（页面树里的 Parent 指回 Pages 节点）用 map 里先登记的编号打断，
+/// 不会无限递归。
+fn copy_page_deep(src: &Document, dst: &mut Document, page_id: ObjectId) -> Res<ObjectId> {
+    // 老编号 -> 新编号。先登记再递归，遇到环时直接命中，天然去重 + 防死循环。
+    let mut map: std::collections::HashMap<ObjectId, ObjectId> = std::collections::HashMap::new();
+
+    // 页面字典本身：只保留页面属性，丢掉指向源文档页面树的 Parent
+    let mut page = src
+        .get_object(page_id)
+        .and_then(|o| o.as_dict())
+        .cloned()
+        .map_err(|e| PdfErr::with(
+            "pdf.readInsertPage",
+            json!({ "msg": e.to_string() }),
+            &format!("failed to read a page to insert: {}", e),
+        ))?;
+    page.remove(b"Parent"); // 指向源文档的页面树，跨文档无意义（插入后由调用方补上新的）
+    // /Annots 保留（表单域、链接、高亮都在这里），它们会被一起深拷贝；
+    // 注释里的 /P 指回本页，递归时命中 map 的正向映射自动改到新页号。
+
+    let new_page_id = dst.new_object_id();
+    map.insert(page_id, new_page_id);
+
+    let mut copied = lopdf::Dictionary::new();
+    for (k, v) in page.iter() {
+        copied.set(k.clone(), copy_object_refs(src, dst, v, &mut map)?);
     }
-    Ok(())
+    dst.set_object(new_page_id, Object::Dictionary(copied));
+    Ok(new_page_id)
+}
+
+/// 递归地把对象里的引用换成「目标文档里的新编号」。
+///
+/// 顺带保证：数组 / 字典 / 流字典里的引用都能改到（旧实现只看了页面字典
+/// 的第一层，图片 XObject 与字体描述符里更深一层的引用全都漏掉了）。
+fn copy_object_refs(
+    src: &Document,
+    dst: &mut Document,
+    obj: &Object,
+    map: &mut std::collections::HashMap<ObjectId, ObjectId>,
+) -> Res<Object> {
+    Ok(match obj {
+        Object::Reference(id) => {
+            let new_id = match map.get(id) {
+                Some(n) => *n,
+                None => {
+                    // 先登记编号再递归，父 -> 子 -> 父 这种环不会无穷递归
+                    let n = dst.new_object_id();
+                    map.insert(*id, n);
+                    let copied = match src.get_object(*id) {
+                        Ok(o) => {
+                            let inner = o.clone();
+                            copy_object_refs(src, dst, &inner, map)?
+                        }
+                        // 源文档里已经不存在（悬空引用）就留个空字典，别把整页搞崩
+                        Err(_) => Object::Dictionary(lopdf::Dictionary::new()),
+                    };
+                    dst.set_object(n, copied);
+                    n
+                }
+            };
+            Object::Reference(new_id)
+        }
+        Object::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for it in items {
+                out.push(copy_object_refs(src, dst, it, map)?);
+            }
+            Object::Array(out)
+        }
+        Object::Dictionary(d) => {
+            let mut out = lopdf::Dictionary::new();
+            for (k, v) in d.iter() {
+                out.set(k.clone(), copy_object_refs(src, dst, v, map)?);
+            }
+            Object::Dictionary(out)
+        }
+        Object::Stream(s) => {
+            // 流的内容（字体文件、图片数据）原样搬过来，只重写它字典里的引用
+            let mut dict = lopdf::Dictionary::new();
+            for (k, v) in s.dict.iter() {
+                dict.set(k.clone(), copy_object_refs(src, dst, v, map)?);
+            }
+            Object::Stream(lopdf::Stream {
+                dict,
+                content: s.content.clone(),
+                allows_compression: s.allows_compression,
+                start_position: None,
+            })
+        }
+        other => other.clone(),
+    })
 }
 
 /// 文档信息（对应 pdfInfo）
@@ -677,7 +767,21 @@ mod tests {
 
     /// 生成一个 n 页的测试 PDF（每页写上 P1 / P2 …，便于按内容校验页序）
     pub fn make_pdf(n: usize) -> Vec<u8> {
+        make_pdf_padded(n, 0)
+    }
+
+    /// 同 make_pdf，但先塞 pad 个无用对象。
+    ///
+    /// 为什么需要它：make_pdf 生成的文档对象编号是固定的（1=Pages、2=Font、
+    /// 3=第 1 页内容流…），两个 make_pdf 之间编号「撞车」但类型恰好也一一对应，
+    /// 于是「沿用原编号拷贝」那个 bug 在测试里表现不出来（实测过：13 项单测
+    /// 全绿，用户的两个真实 PDF 一插就乱码）。加了 padding 让待插文档的编号整体
+    /// 后移，才会撞上目标文档里类型完全不同的对象。
+    pub fn make_pdf_padded(n: usize, pad: usize) -> Vec<u8> {
         let mut doc = Document::with_version("1.5");
+        for i in 0..pad {
+            doc.add_object(dictionary! { "Kind" => format!("pad{}", i) });
+        }
         let pages_id = doc.new_object_id();
         // 用内置的 Helvetica 字体，避免嵌入任何外部文件
         let font_id = doc.add_object(dictionary! {
@@ -865,8 +969,156 @@ mod tests {
     }
 
     #[test]
-    fn metadata_is_preserved() {
-        let pdf = make_pdf(3);
+    fn insert_keeps_page_content_when_ids_collide() {
+        // 回归：用户在 examples 里放的两个真实 PDF 插出来是乱码。
+        //
+        // 根因是「按原编号拷贝、编号被占用就跳过」：两个文档的对象编号互相
+        // 撞车后，插入页的 /Contents 会指到目标文档里类型完全不同的对象
+        // （实测指向一个字体字典），解析器拿不到内容流。
+        //
+        // 这里用 pad 把待插文档的编号整体后移，制造出真实文件那种撞车局面。
+        // 旧的 copy_referenced 实现下这个断言会失败（内容读出来是空的）。
+        let base = make_pdf(3);
+        let add = make_pdf_padded(2, 5);
+
+        // 前置条件：真的有编号重叠，且重叠处类型不同（否则测不出东西）
+        let b = Document::load_mem(&base).unwrap();
+        let a = Document::load_mem(&add).unwrap();
+        let overlap = b
+            .objects
+            .keys()
+            .filter(|id| a.objects.contains_key(id))
+            .count();
+        assert!(overlap > 0, "测试构造失效：两个文档没有编号重叠");
+
+        let out = insert_pdf(&base, &add, "tail", None).unwrap();
+        assert_eq!(page_count(&Document::load_mem(&out).unwrap()), 5);
+        // 内容没丢：插入的两页仍然是 PAGE 1 / PAGE 2
+        assert_eq!(page_seq(&out), vec!["1", "2", "3", "1", "2"]);
+
+        // 每一页的 /Contents 都必须真的指向一个内容流 —— 这是乱码 bug 的直接判据
+        let o = Document::load_mem(&out).unwrap();
+        for (n, id) in o.get_pages() {
+            let content = o.get_page_content(id);
+            assert!(
+                !content.is_empty(),
+                "第 {} 页的内容流是空的（/Contents 指错了对象）",
+                n
+            );
+        }
+    }
+
+    #[test]
+    fn insert_survives_shared_font_and_image_resources() {
+        // 真实 PDF 里插入页引用的字体 / 图片是共享对象，且引用嵌套很深
+        // （页面 -> Resources -> Font -> …）。深拷贝必须一路改到，
+        // 否则插入页会引用到目标文档里同编号但完全无关的对象。
+        let base = make_pdf(2);
+        let add = make_pdf_padded(1, 3);
+        let out = insert_pdf(&base, &add, "head", None).unwrap();
+        let o = Document::load_mem(&out).unwrap();
+        assert_eq!(page_count(&o), 3);
+
+        // 第 1 页是插入进来的：Resources 里的字体引用必须能在新文档里解析到
+        let first = o.get_pages()[&1];
+        let resources = o
+            .get_object(first)
+            .and_then(|x| x.as_dict())
+            .and_then(|d| d.get(b"Resources"))
+            .cloned()
+            .unwrap();
+        let res_dict = o.dereference(&resources).unwrap().1.as_dict().unwrap().clone();
+        let fonts = res_dict.get(b"Font").unwrap().clone();
+        let fonts_dict = o
+            .dereference(&fonts)
+            .unwrap()
+            .1
+            .as_dict()
+            .unwrap()
+            .clone();
+        let font_ref = fonts_dict.get(b"F1").unwrap().clone();
+
+        assert!(font_ref.as_reference().is_ok(), "/Resources/Font/F1 不是引用");
+        let font_id = font_ref.as_reference().unwrap();
+        assert!(
+            o.get_object(font_id).is_ok(),
+            "字体引用指向的对象在新文档里不存在（引用没被重写）"
+        );
+        assert_eq!(
+            o.get_object(font_id)
+                .unwrap()
+                .as_dict()
+                .unwrap()
+                .get(b"BaseFont")
+                .unwrap()
+                .as_name()
+                .unwrap(),
+            b"Helvetica"
+        );
+    }
+    #[test]
+    fn insert_gives_every_new_page_a_parent() {
+        // 页面树是平的，插入页必须挂到新文档的 Pages 节点上；
+        // 忘了补 Parent 的话某些阅读器的页面树解析会失败。
+        let base = make_pdf(2);
+        let add = make_pdf_padded(1, 4);
+        let out = insert_pdf(&base, &add, "tail", None).unwrap();
+        let o = Document::load_mem(&out).unwrap();
+
+        let root = o.trailer.get(b"Root").and_then(|x| x.as_reference()).unwrap();
+        let pages_id = o
+            .get_object(root)
+            .and_then(|x| x.as_dict())
+            .and_then(|d| d.get(b"Pages"))
+            .and_then(|x| x.as_reference())
+            .unwrap();
+        for (n, id) in o.get_pages() {
+            let parent = o
+                .get_object(id)
+                .and_then(|x| x.as_dict())
+                .and_then(|d| d.get(b"Parent"))
+                .and_then(|x| x.as_reference())
+                .unwrap_or_else(|_| panic!("第 {} 页没有 Parent", n));
+            assert_eq!(parent, pages_id, "第 {} 页的 Parent 不是新的 Pages 节点", n);
+        }
+    }
+
+    #[test]
+    fn insert_does_not_break_base_pages() {
+        // 插入不能改坏原有页：原有页的 Resources / Contents 必须还指向自己的东西。
+        let base = make_pdf(3);
+        let add = make_pdf_padded(2, 6);
+        let out = insert_pdf(&base, &add, "tail", None).unwrap();
+        assert_eq!(page_seq(&out), vec!["1", "2", "3", "1", "2"]);
+        for (n, id) in Document::load_mem(&out).unwrap().get_pages() {
+            let s = String::from_utf8_lossy(
+                &Document::load_mem(&out).unwrap().get_page_content(id),
+            )
+            .to_string();
+            assert!(s.contains("PAGE "), "第 {} 页内容不完整: {:?}", n, s);
+        }
+    }
+
+    #[test]
+    fn insert_twice_does_not_duplicate_ids() {
+        // 连续插入两次：第二次的页必须拿到全新编号，不能覆盖第一次插进去的页。
+        let base = make_pdf(2);
+        let add = make_pdf_padded(1, 2);
+        let once = insert_pdf(&base, &add, "tail", None).unwrap();
+        let twice = insert_pdf(&once, &add, "tail", None).unwrap();
+        assert_eq!(page_count(&Document::load_mem(&twice).unwrap()), 4);
+        assert_eq!(page_seq(&twice), vec!["1", "2", "1", "1"]);
+        for (n, id) in Document::load_mem(&twice).unwrap().get_pages() {
+            assert!(
+                !Document::load_mem(&twice).unwrap().get_page_content(id).is_empty(),
+                "第 {} 页内容流是空的",
+                n
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_is_preserved() {        let pdf = make_pdf(3);
         // 先给源文档写上 Title / Author
         let mut doc = Document::load_mem(&pdf).unwrap();
         doc.trailer.set(

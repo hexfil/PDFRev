@@ -27,7 +27,7 @@
 | 拖动缩略图排序 / 输入顺序 | `pdf_op { op: "reorder" }` |
 | 提取为新 PDF | `pdf_op { op: "extract" }` |
 | 旋转 90 / 180 / 270 | `pdf_op { op: "rotate" }` |
-| 插入另一个 PDF（首页/尾页/第 N 页前后） | `pdf_op { op: "insert" }` |
+| 插入另一个 PDF（首页/尾页/第 N 页前后，页面对象重新编号+改写引用） | `pdf_op { op: "insert" }` |
 | 反转全部页序、撤销 | 前端 + `pdf_op` |
 | 双击预览、预览内 Delete 删页、Home/End 跳页 | 前端（与原版相同） |
 | 预览滚轮缩放（以光标为中心） | 前端 |
@@ -67,11 +67,11 @@ dist\LICENSE                        MIT 许可原文，随包分发
 ```
 
 **单文件即可独立运行**：拷到任意目录（U 盘也行）双击即可，不需要额外的 dll。
-（已实测：把 exe 单独放进空目录，109 项自检全部通过。）
+（已实测：把 exe 单独放进空目录，110 项自检全部通过。）
 
 ## 测试
 
-### 1. Rust 单元测试（14 项，不需要 GUI）
+### 1. Rust 单元测试（19 项，不需要 GUI）
 
 ```powershell
 cd F:\PDFRev_Tauri\src-tauri
@@ -91,7 +91,7 @@ cargo run --example vpeg_check
 会校验页数、删/抽/转/插/排序的结果，最后比对源文件 sha256 **未被改写**，
 并把产物写到 `test/VPEg-tauri-out.pdf` 供人工用阅读器确认。
 
-### 3. 界面端到端自检（109 项，真实 WebView2）
+### 3. 界面端到端自检（110 项，真实 WebView2）
 
 ```powershell
 cd F:\PDFRev_Tauri
@@ -115,7 +115,7 @@ src/                        前端（与原版共享界面逻辑）
   i18n.js                   ★ 多语言词典与切换逻辑（界面文案唯一来源）
   style.css                 样式
   bridge-tauri.js           ★ 把 Rust 命令包成和 Electron 版一致的 window.api
-  selfcheck.js              界面端到端自检（--selfcheck 时跑，109 项）
+  selfcheck.js              界面端到端自检（--selfcheck 时跑，110 项）
   vendor/pdf.js             PDF.js（渲染缩略图/预览）
   vendor/pdf.worker.js
   fixtures/p5.pdf, p2.pdf   自检用的合成 PDF（pdf-lib 生成的真 PDF）
@@ -123,7 +123,7 @@ src/                        前端（与原版共享界面逻辑）
   assets/pdfrev_icon.png    界面用图标（同上）
 src-tauri/
   src/lib.rs                全部 IPC 命令（对应原版 main.js + preload.js）
-  src/pdfops.rs             PDF 页面操作核心（对应原版 pdfops.js）+ 14 项单元测试
+  src/pdfops.rs             PDF 页面操作核心（对应原版 pdfops.js）+ 19 项单元测试
   examples/vpeg_check.rs    真实文档端到端验收
   tauri.conf.json           窗口、CSP、打包配置
   icons/icon.ico            应用图标（多尺寸，由 tools/make-assets.py 生成）
@@ -187,6 +187,18 @@ Rust 侧用 `Err(ErrPayload)` 表达失败，Tauri 会把它变成 **Promise rej
    表现成「所有操作后页数都是 0」；
 2. 页面对象要**重新编号并统一挂到新 Pages 节点**，
    否则和旧文档的对象编号体系冲突。
+
+### 4.1 插入另一个 PDF 时，不能沿用源文档的对象编号
+
+两个 PDF 的对象编号各自独立分配，几乎必然撞车。早期实现是
+「按原编号拷进去，编号已占用就跳过」，结果插入页的 `/Contents`
+会指到目标文档里**类型完全不同**的对象（实测指向一个字体字典），
+页渲染成空白 / 乱码 —— 而页数是对的，所以只数页数的测试抓不到。
+
+正确做法是 `copy_page_deep()`：**每个被拷贝的对象都分配全新编号**，
+并递归改写对象内部（数组 / 字典 / 流字典）所有指向它们的引用，
+用 `HashMap<老编号, 新编号>` 先登记再递归来去重和打断自引用环。
+详见 handoff.md 的 5.30。
 
 ### 5. PDF 字符串要认 UTF-16
 

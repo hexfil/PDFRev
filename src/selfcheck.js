@@ -476,8 +476,38 @@
         const afterIns = await window.api.info(insRes.data);
         put('插入后页数 = 原页数 + 2', afterIns.info.pages === beforeIns.info.pages + 2,
           beforeIns.info.pages + ' -> ' + afterIns.info.pages);
-      }
-      /* 不把插入结果写回 state：后续第 12 步要按 4 页断言 */
+
+        /* 内容真的在（不只是页数对）—— 用 pdf.js 把插入后的文档渲染成
+           缩略图，和直接渲染插入源文件的缩略图逐张比像素。乱码 bug 就是
+           「页数对、内容空/错」，只数页数是抓不到的。 */
+        const sameInk = async (bytes, pages, refBytes, refPages) => {
+          const paint = async (b, idx) => {
+            const d = await pdfjsLib.getDocument({ data: b.slice() }).promise;
+            const p = await d.getPage(idx);
+            const vp = p.getViewport({ scale: 0.4 });
+            const cv = document.createElement('canvas');
+            cv.width = Math.max(1, Math.ceil(vp.width));
+            cv.height = Math.max(1, Math.ceil(vp.height));
+            await p.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+            const px = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+            let dark = 0;
+            for (let i = 0; i < px.length; i += 4) if (px[i] < 200) dark++;
+            d.destroy();
+            return dark;
+          };
+          const out = [];
+          for (let k = 0; k < pages; k++) {
+            out.push(await paint(bytes, afterIns.info.pages - pages + 1 + k));
+          }
+          const ref = [];
+          for (let k = 1; k <= refPages; k++) ref.push(await paint(refBytes, k));
+          return { out, ref };
+        };
+        const cmp = await sameInk(insRes.data, 2, insBytes, 2);
+        put('插入的页真的画出了内容（不是空白/指错对象）',
+          cmp.out.length === 2 && cmp.out.every((v, i) => v > 20 && Math.abs(v - cmp.ref[i]) <= cmp.ref[i] * 0.15),
+          'inserted=' + JSON.stringify(cmp.out) + ' source=' + JSON.stringify(cmp.ref));
+      }      /* 不把插入结果写回 state：后续第 12 步要按 4 页断言 */
 
       /* 空 data + 空 pdfPath 必须明确报错（而不是报当前工作目录） */
       const noSrc = await window.api.op('insert', curBytes(), { at: 'tail' });
